@@ -41,6 +41,14 @@ function getTrialEndIso(subscription: any) {
   return new Date(Date.now() + 7 * 86400000).toISOString();
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPaymentUrl(payment: any) {
+  return payment?.invoiceUrl ?? payment?.bankSlipUrl ?? payment?.paymentLink ?? payment?.transactionReceiptUrl ?? null;
+}
+
 async function ensureAsaasSubscription(input: {
   agencyId: string;
   agency: any;
@@ -52,6 +60,7 @@ async function ensureAsaasSubscription(input: {
   const subscriptionValue = getEstimatedPriceWithReferralDiscount(input.plan, input.billingCycle, activeReferralCount);
   let asaasSubscriptionId = input.subscription?.asaas_subscription_id ?? null;
   let customerId = input.subscription?.asaas_customer_id ?? null;
+  let initialPaymentUrl: string | null = null;
 
   if (!customerId) {
     const billingEmail = await getAgencyBillingEmail(input.agencyId, input.agency?.email);
@@ -67,7 +76,7 @@ async function ensureAsaasSubscription(input: {
 
   if (!asaasSubscriptionId) {
     const trialEndsAt = getTrialEndIso(input.subscription);
-    const created = await asaasRequest<{ id: string }>("/subscriptions", {
+    const created = await asaasRequest<any>("/subscriptions", {
       method: "POST",
       body: asaasSubscriptionPayload({
         customer: customerId,
@@ -78,6 +87,7 @@ async function ensureAsaasSubscription(input: {
       })
     });
     asaasSubscriptionId = created.id;
+    initialPaymentUrl = getPaymentUrl(created);
   }
 
   const trialEndsAt = getTrialEndIso(input.subscription);
@@ -98,20 +108,25 @@ async function ensureAsaasSubscription(input: {
     .select()
     .single();
 
-  return { subscription: updated, asaasSubscriptionId };
+  return { subscription: updated, asaasSubscriptionId, initialPaymentUrl };
 }
 
 async function getLatestSubscriptionPayment(asaasSubscriptionId: string) {
   const response = await asaasRequest<{ data?: any[] }>(`/subscriptions/${asaasSubscriptionId}/payments?limit=10`);
-  const payments = response.data ?? [];
+  let payments = response.data ?? [];
+  if (!payments.length) {
+    const fallback = await asaasRequest<{ data?: any[] }>(`/payments?subscription=${encodeURIComponent(asaasSubscriptionId)}&limit=10`);
+    payments = fallback.data ?? [];
+  }
+  if (!payments.length) {
+    await wait(900);
+    const retry = await asaasRequest<{ data?: any[] }>(`/payments?subscription=${encodeURIComponent(asaasSubscriptionId)}&limit=10`);
+    payments = retry.data ?? [];
+  }
   return payments.find((payment) => ["PENDING", "OVERDUE"].includes(payment.status))
     ?? payments.find((payment) => payment.invoiceUrl || payment.bankSlipUrl || payment.paymentLink)
     ?? payments[0]
     ?? null;
-}
-
-function getPaymentUrl(payment: any) {
-  return payment?.invoiceUrl ?? payment?.bankSlipUrl ?? payment?.paymentLink ?? null;
 }
 
 export async function POST(request: Request) {
@@ -237,7 +252,7 @@ export async function POST(request: Request) {
       const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
       const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle });
       const payment = await getLatestSubscriptionPayment(ensured.asaasSubscriptionId);
-      const invoiceUrl = getPaymentUrl(payment);
+      const invoiceUrl = getPaymentUrl(payment) ?? ensured.initialPaymentUrl;
 
       if (payment) {
         await supabaseAdmin.from("billing_history").upsert({
@@ -263,7 +278,7 @@ export async function POST(request: Request) {
       return NextResponse.json({
         checkoutUrl: invoiceUrl,
         subscription: ensured.subscription,
-        message: invoiceUrl ? "Abrindo pagamento." : "Assinatura criada. O link de pagamento ainda não foi liberado pelo Asaas; tente novamente em alguns segundos."
+        message: invoiceUrl ? "Abrindo ativação." : "Sua ativação foi registrada. Aguarde alguns segundos e clique novamente para abrir o pagamento."
       });
     }
 

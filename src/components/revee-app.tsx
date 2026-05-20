@@ -1627,7 +1627,8 @@ export function ReveeApp() {
       notify(data.message ?? "Assinatura atualizada");
       return data;
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Erro na assinatura");
+      const errorMessage = error instanceof Error ? error.message : "Erro na assinatura";
+      notify(errorMessage.includes("ASAAS_API_KEY") ? "A configuração de pagamento ainda não está ativa neste ambiente." : errorMessage);
       return null;
     }
   }
@@ -1849,16 +1850,22 @@ function TrialActivationGate({
     setMessage("");
     const data = await onActivate(selectedPlan, cycle);
     if (!data?.checkoutUrl) {
-      setMessage(data?.message ?? "Criamos sua assinatura, mas o link do Asaas ainda não apareceu. Tente novamente em alguns segundos.");
+      setMessage(data?.message ?? "Estamos preparando sua tela de ativação. Tente novamente em alguns segundos.");
     }
     setBusy(false);
+  }
+
+  function annualSaving(plan: SubscriptionPlan) {
+    return PLANS[plan].monthlyPrice * 12 - PLANS[plan].annualPrice;
   }
 
   return (
     <div className="min-h-screen bg-primary px-4 py-6 text-white sm:px-6 lg:px-10">
       <div className="mx-auto flex min-h-[calc(100vh-48px)] max-w-6xl flex-col">
         <header className="flex items-center justify-between gap-4">
-          <ReveeLogo tone="light" className="h-7 max-w-[230px] object-contain" />
+          <div className="text-2xl font-semibold tracking-[-0.04em] text-white">
+            Revee<span className="font-bold">Aprove</span>
+          </div>
           <button className="rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white" onClick={() => void onLogout()}>
             Sair
           </button>
@@ -1874,10 +1881,10 @@ function TrialActivationGate({
               Ative seu teste para entrar no ReveeAprove.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-8 text-white/70">
-              Olá, {agencyName}. Escolha um plano, cadastre a forma de pagamento no ambiente seguro do Asaas e comece a usar agora. A primeira cobrança fica para depois do período gratuito.
+              Olá, {agencyName}. Escolha um plano, ative seu teste gratuito e comece a organizar aprovações, clientes e conteúdos em um só lugar.
             </p>
             <div className="mt-8 grid gap-3 text-sm text-white/78 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Checkout seguro no Asaas</div>
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Ativação segura</div>
               <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Cobrança só após 7 dias</div>
               <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Cancele quando quiser</div>
             </div>
@@ -1920,6 +1927,11 @@ function TrialActivationGate({
                         <div className="flex items-center gap-2 text-lg font-semibold">
                           {config.name}
                           {plan === "premium" && <Crown className="h-4 w-4 text-accent-dark" />}
+                          {cycle === "annual" && (
+                            <span className="rounded-full bg-[#e9f7f0] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] text-[#2f7a5c]">
+                              Economize {formatCurrency(annualSaving(plan))}
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 text-sm text-muted">
                           {config.clientLimit === null ? "Clientes ilimitados" : `Até ${config.clientLimit} clientes`} · {config.memberLimit ? `até ${config.memberLimit} membros` : "sem membros"}
@@ -1927,7 +1939,9 @@ function TrialActivationGate({
                       </div>
                       <div className="text-right">
                         <div className="text-lg font-semibold">{formatCurrency(getPlanPrice(plan, cycle))}</div>
-                        <div className="text-xs text-muted">{cycle === "annual" ? "por ano" : "por mês"}</div>
+                        <div className="text-xs text-muted">
+                          {cycle === "annual" ? `${formatCurrency(getPlanPrice(plan, cycle) / 12)}/mês no anual` : "por mês"}
+                        </div>
                       </div>
                     </div>
                   </button>
@@ -1946,7 +1960,7 @@ function TrialActivationGate({
               Começar teste grátis
             </button>
             <p className="mt-3 text-center text-xs leading-5 text-muted">
-              O pagamento é processado fora do ReveeAprove. A chave do Asaas fica protegida no backend.
+              Seus 7 dias grátis começam agora. A primeira cobrança fica programada para depois do teste.
             </p>
           </section>
         </main>
