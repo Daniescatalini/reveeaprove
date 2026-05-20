@@ -1,0 +1,486 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #170b43;
+  --accent: #b688d6;
+  --accent-light: #f0e4f9;
+  --accent-mid: #d4b3e8;
+  --accent-dark: #8a50b0;
+  --bg: #f2f2f2;
+  --surface: #ffffff;
+  --surface2: #f7f7f7;
+  --border: rgba(23, 11, 67, 0.1);
+  --border-mid: rgba(23, 11, 67, 0.18);
+  --text-primary: #170b43;
+  --text-secondary: #4a4568;
+  --text-muted: #8b87a0;
+  --green: #4caf85;
+  --green-light: #e4f5ee;
+  --amber: #e8975a;
+  --amber-light: #fdf0e6;
+  --red: #e05c5c;
+  --red-light: #fdf0f0;
+  --shadow-premium: 0 1px 0 rgba(23, 11, 67, 0.05), 0 18px 54px rgba(23, 11, 67, 0.08);
+  --shadow-premium-hover: 0 1px 0 rgba(23, 11, 67, 0.06), 0 26px 70px rgba(23, 11, 67, 0.13);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+body {
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--text-primary);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition-duration: 160ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::selection {
+  background: rgba(182, 136, 214, 0.28);
+}
+
+.glass-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.glass-scroll::-webkit-scrollbar-thumb {
+  background: rgba(23, 11, 67, 0.16);
+  border-radius: 99px;
+}
+
+.mobile-safe {
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+.instagram-frame {
+  box-shadow: 0 1px 0 rgba(23, 11, 67, 0.08), 0 18px 60px rgba(23, 11, 67, 0.12);
+}
+
+.premium-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.9)),
+    var(--surface);
+  border: 1px solid rgba(23, 11, 67, 0.1);
+  box-shadow: var(--shadow-premium);
+  backdrop-filter: blur(14px);
+}
+
+.premium-card-hover {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms;
+}
+
+.premium-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(182, 136, 214, 0.42);
+  box-shadow: var(--shadow-premium-hover);
+}
+
+.premium-button {
+  box-shadow: 0 10px 24px rgba(23, 11, 67, 0.12);
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms;
+}
+
+.premium-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(23, 11, 67, 0.16);
+}
+
+.premium-input {
+  box-shadow: inset 0 1px 0 rgba(23, 11, 67, 0.02);
+}
+
+.soft-panel {
+  background: linear-gradient(180deg, rgba(240, 228, 249, 0.38), rgba(255, 255, 255, 0.64));
+  border: 1px solid rgba(182, 136, 214, 0.22);
+}
+
+.timeline-line {
+  background: linear-gradient(180deg, rgba(182, 136, 214, 0.42), rgba(23, 11, 67, 0.06));
+}
+
+[data-theme="dark"] {
+  --primary: #f8f3ff;
+  --accent: #d9b8ff;
+  --accent-light: rgba(217, 184, 255, 0.18);
+  --accent-dark: #e8d5ff;
+  --bg: #0d0a13;
+  --surface: #181321;
+  --surface2: #241e30;
+  --border: rgba(255, 255, 255, 0.15);
+  --border-mid: rgba(255, 255, 255, 0.24);
+  --text-primary: #fbf8ff;
+  --text-secondary: #e3dced;
+  --text-muted: #beb5ce;
+  --shadow-premium: 0 1px 0 rgba(255, 255, 255, 0.05), 0 22px 70px rgba(0, 0, 0, 0.34);
+  --shadow-premium-hover: 0 1px 0 rgba(255, 255, 255, 0.08), 0 28px 82px rgba(0, 0, 0, 0.48);
+  color: #fbf8ff;
+}
+
+[data-theme="dark"].bg-canvas,
+[data-theme="dark"] .bg-canvas {
+  background: radial-gradient(circle at top left, rgba(217, 184, 255, 0.08), transparent 28%), #0f0d14;
+  color: #fbf8ff;
+}
+
+[data-theme="dark"].text-ink,
+[data-theme="dark"] .text-ink,
+[data-theme="dark"] .text-primary {
+  color: #f7f3ff;
+}
+
+[data-theme="dark"],
+[data-theme="dark"] main,
+[data-theme="dark"] section,
+[data-theme="dark"] article,
+[data-theme="dark"] .premium-card,
+[data-theme="dark"] .soft-panel,
+[data-theme="dark"] .instagram-frame {
+  color: #fbf8ff;
+}
+
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] p,
+[data-theme="dark"] span,
+[data-theme="dark"] div,
+[data-theme="dark"] label {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .text-muted {
+  color: #eee8f8;
+}
+
+[data-theme="dark"] .text-white\/35,
+[data-theme="dark"] .text-white\/40,
+[data-theme="dark"] .text-white\/45,
+[data-theme="dark"] .text-white\/60,
+[data-theme="dark"] .text-white\/70,
+[data-theme="dark"] .text-white\/75,
+[data-theme="dark"] .text-white\/82 {
+  color: rgba(255, 255, 255, 0.86);
+}
+
+[data-theme="dark"] .bg-white,
+[data-theme="dark"] .bg-\[\#fbfbfb\],
+[data-theme="dark"] .bg-\[\#f7f7f7\],
+[data-theme="dark"] .bg-\[\#fafafe\] {
+  background-color: #181321;
+}
+
+[data-theme="dark"] .bg-\[\#fbfbfb\],
+[data-theme="dark"] .bg-\[\#f7f7f7\]\/85,
+[data-theme="dark"] .bg-white\/70,
+[data-theme="dark"] .bg-white\/85,
+[data-theme="dark"] .bg-white\/88 {
+  background-color: rgba(28, 22, 38, 0.94);
+}
+
+[data-theme="dark"] .premium-card {
+  background:
+    linear-gradient(180deg, rgba(35, 28, 48, 0.94), rgba(24, 19, 33, 0.92)),
+    #181321;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .premium-card-hover:hover {
+  border-color: rgba(217, 184, 255, 0.36);
+}
+
+[data-theme="dark"] .soft-panel {
+  background: linear-gradient(180deg, rgba(217, 184, 255, 0.14), rgba(24, 19, 33, 0.64));
+  border-color: rgba(217, 184, 255, 0.2);
+}
+
+[data-theme="dark"] .timeline-line {
+  background: linear-gradient(180deg, rgba(217, 184, 255, 0.42), rgba(255, 255, 255, 0.08));
+}
+
+[data-theme="dark"] .border-line,
+[data-theme="dark"] .border-border-mid {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .text-\[\#4a4568\] {
+  color: #ece6f5;
+}
+
+[data-theme="dark"] .text-\[\#170b43\],
+[data-theme="dark"] .text-\[\#6f6a86\],
+[data-theme="dark"] .text-\[\#8b87a0\],
+[data-theme="dark"] .text-\[\#46658e\],
+[data-theme="dark"] .text-\[\#7450a8\],
+[data-theme="dark"] .text-\[\#8a4a63\] {
+  color: #fbf8ff;
+}
+
+[data-theme="dark"] .text-primary,
+[data-theme="dark"] .font-semibold,
+[data-theme="dark"] .font-bold {
+  text-shadow: 0 0 0 rgba(255,255,255,0);
+}
+
+[data-theme="dark"] .bg-accent-light,
+[data-theme="dark"] .bg-\[\#f0e4f9\] {
+  background-color: rgba(217, 184, 255, 0.14);
+}
+
+[data-theme="dark"] .text-accent-dark,
+[data-theme="dark"] .text-\[\#6a30a0\] {
+  color: #e8d5ff;
+}
+
+[data-theme="dark"] .bg-primary {
+  background-color: #151020;
+}
+
+[data-theme="dark"] .bg-canvas {
+  background-color: #0f0d14;
+}
+
+[data-theme="dark"] .ring-\[\#f2f2f2\] {
+  --tw-ring-color: #0f0d14;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background-color: #241d31;
+  color: #fbf8ff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+[data-theme="dark"] option {
+  background: #241d31;
+  color: #fbf8ff;
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: #ddd3eb;
+}
+
+[data-theme="dark"] button,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  color: #fbf8ff;
+}
+
+[data-theme="dark"] .hover\:bg-accent-light:hover,
+[data-theme="dark"] .hover\:bg-accent-light\/50:hover {
+  background-color: rgba(217, 184, 255, 0.22);
+}
+
+[data-theme="dark"] .bg-success {
+  background-color: #3fbf86;
+}
+
+[data-theme="dark"] .bg-amber {
+  background-color: #f1a666;
+}
+
+[data-theme="dark"] .bg-danger {
+  background-color: #ef6b78;
+}
+
+[data-theme="dark"] .text-danger {
+  color: #ff9ba5;
+}
+
+[data-theme="dark"] .bg-red-light {
+  background-color: rgba(239, 107, 120, 0.16);
+}
+
+[data-theme="dark"] .bg-\[\#e4f5ee\] {
+  background-color: rgba(63, 191, 134, 0.16);
+}
+
+[data-theme="dark"] .bg-\[\#fdf0e6\] {
+  background-color: rgba(241, 166, 102, 0.16);
+}
+
+[data-theme="dark"] .text-\[\#2a7a58\] {
+  color: #83e6b7;
+}
+
+[data-theme="dark"] .text-\[\#a06020\] {
+  color: #ffc28a;
+}
+
+[data-theme="dark"] .bg-\[\#e8eef7\],
+[data-theme="dark"] .bg-\[\#efe8fb\],
+[data-theme="dark"] .bg-\[\#f2e9f8\],
+[data-theme="dark"] .bg-\[\#f6e7ee\],
+[data-theme="dark"] .bg-\[\#f7f6fa\] {
+  background-color: rgba(217, 184, 255, 0.16);
+}
+
+[data-theme="dark"] .glass-scroll::-webkit-scrollbar-thumb {
+  background: rgba(217, 184, 255, 0.26);
+}
+
+[data-theme="dark"] .shadow-soft {
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.28);
+}
+
+[data-theme="dark"] .shadow-modal {
+  box-shadow: 0 32px 100px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="dark"] .instagram-frame {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 60px rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="dark"] {
+  --bg: #000000;
+  --surface: #07070a;
+  --surface2: #0d0c12;
+  --border: rgba(255, 255, 255, 0.16);
+  --border-mid: rgba(255, 255, 255, 0.28);
+  --text-primary: #ffffff;
+  --text-secondary: #f4f0fb;
+  --text-muted: #d6cfdf;
+  background: #000000;
+  color: #ffffff;
+  color-scheme: dark;
+}
+
+[data-theme="dark"].bg-canvas,
+[data-theme="dark"] .bg-canvas,
+[data-theme="dark"] main,
+[data-theme="dark"] body {
+  background: #000000;
+  color: #ffffff;
+}
+
+[data-theme="dark"] .premium-card,
+[data-theme="dark"] .instagram-frame {
+  background: #08070d;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+[data-theme="dark"] .soft-panel {
+  background: #0d0b13;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme="dark"] .bg-white,
+[data-theme="dark"] .bg-white\/70,
+[data-theme="dark"] .bg-white\/85,
+[data-theme="dark"] .bg-white\/88,
+[data-theme="dark"] .bg-white\/90,
+[data-theme="dark"] .bg-white\/92,
+[data-theme="dark"] [class*="bg-[#fbfbfb"],
+[data-theme="dark"] [class*="bg-[#f7f7f7"],
+[data-theme="dark"] [class*="bg-[#fafafe"],
+[data-theme="dark"] [class*="bg-[#fff5f8"],
+[data-theme="dark"] [class*="bg-[#fff5f7"] {
+  background: #07070a !important;
+  background-color: #07070a !important;
+}
+
+[data-theme="dark"] .bg-primary {
+  background-color: #000000;
+}
+
+[data-theme="dark"] .bg-accent-light,
+[data-theme="dark"] .bg-accent-light\/30,
+[data-theme="dark"] .bg-accent-light\/35,
+[data-theme="dark"] .bg-accent-light\/40,
+[data-theme="dark"] .bg-accent-light\/50,
+[data-theme="dark"] .bg-\[\#f0e4f9\] {
+  background-color: #15101d !important;
+}
+
+[data-theme="dark"] .calendar-cell-attention {
+  background: #101015 !important;
+}
+
+[data-theme="dark"] .calendar-post-pill {
+  background: #120d15 !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .calendar-post-pill span[style] {
+  background: #d9b8ff !important;
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: #09090d !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"] {
+  color-scheme: dark;
+}
+
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.6);
+  opacity: 1;
+}
+
+[data-theme="dark"] .text-primary,
+[data-theme="dark"] .text-muted,
+[data-theme="dark"] .text-accent-dark,
+[data-theme="dark"] .text-\[\#4a4568\],
+[data-theme="dark"] .text-\[\#8a4a63\],
+[data-theme="dark"] .text-\[\#6f6a86\],
+[data-theme="dark"] .text-\[\#8b87a0\] {
+  color: #ffffff !important;
+}
+
+[data-theme="dark"] button.border-line,
+[data-theme="dark"] .border-line,
+[data-theme="dark"] .border-border-mid {
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+[data-theme="dark"] .premium-button.bg-primary {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 16px 34px rgba(0, 0, 0, 0.46);
+}
+
+[data-theme="dark"] .hover\:bg-\[\#f7f7f7\]:hover,
+[data-theme="dark"] .hover\:bg-\[\#f6e7ee\]:hover,
+[data-theme="dark"] .hover\:bg-accent-light:hover,
+[data-theme="dark"] .hover\:bg-accent-light\/50:hover {
+  background-color: #17121f !important;
+}

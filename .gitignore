@@ -1,0 +1,16 @@
+node_modules
+node_modules*
+.next
+.next*
+out
+out*
+.env
+.env.local
+.env.*.local
+.env*.save
+*.log
+.DS_Store
+*.tsbuildinfo
+*.rtf
+*.html.txt
+/login-corrigido.png

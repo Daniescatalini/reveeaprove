@@ -1,0 +1,537 @@
+create extension if not exists "pgcrypto";
+
+do $$ begin
+  create type public.user_role as enum ('agency', 'member', 'client');
+exception when duplicate_object then null; end $$;
+
+alter type public.user_role add value if not exists 'member';
+
+do $$ begin
+  create type public.content_status as enum (
+    'draft',
+    'creating',
+    'awaiting_approval',
+    'approved',
+    'revision_requested',
+    'scheduled',
+    'published'
+  );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type public.pipeline_stage as enum (
+    'needs_recording',
+    'needs_design',
+    'needs_caption',
+    'waiting_client',
+    'revision',
+    'approved',
+    'published'
+  );
+exception when duplicate_object then null; end $$;
+
+alter type public.pipeline_stage add value if not exists 'revision';
+
+create table if not exists public.agencies (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.clients (
+  id uuid primary key default gen_random_uuid(),
+  agency_id uuid not null references public.agencies(id) on delete cascade,
+  name text not null,
+  email text,
+  instagram_handle text,
+  phone text,
+  avatar text,
+  brand_color text default '#170b43',
+  invite_code text unique,
+  created_at timestamptz not null default now()
+);
+
+alter table public.clients add column if not exists email text;
+alter table public.clients add column if not exists invite_code text;
+create unique index if not exists clients_invite_code_key on public.clients(invite_code) where invite_code is not null;
+
+create table if not exists public.users (
+  id uuid primary key references auth.users(id) on delete cascade,
+  name text not null,
+  email text not null unique,
+  role public.user_role not null default 'agency',
+  avatar text,
+  agency_id uuid references public.agencies(id) on delete set null,
+  client_id uuid references public.clients(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.posts (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.clients(id) on delete cascade,
+  title text not null,
+  caption text,
+  instructions text,
+  status public.content_status not null default 'draft',
+  pipeline_stage public.pipeline_stage not null default 'needs_design',
+  scheduled_date date not null,
+  scheduled_time time,
+  feed_order integer not null default 0,
+  created_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  submitted_at timestamptz,
+  approved_at timestamptz,
+  revision_requested_at timestamptz,
+  scheduled_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.posts add column if not exists submitted_at timestamptz;
+alter table public.posts add column if not exists approved_at timestamptz;
+alter table public.posts add column if not exists revision_requested_at timestamptz;
+alter table public.posts add column if not exists scheduled_at timestamptz;
+alter table public.posts add column if not exists updated_at timestamptz not null default now();
+
+create table if not exists public.post_media (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  media_url text not null,
+  media_type text not null check (media_type in ('image', 'video')),
+  order_index integer not null default 0
+);
+
+create table if not exists public.comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.team_members (
+  id uuid primary key default gen_random_uuid(),
+  agency_id uuid not null references public.agencies(id) on delete cascade,
+  user_id uuid references public.users(id) on delete set null,
+  name text not null,
+  email text not null,
+  role_title text not null,
+  avatar text,
+  access_code text not null unique,
+  status text not null default 'invited' check (status in ('active','invited','inactive')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists clients_agency_id_idx on public.clients(agency_id);
+create index if not exists users_agency_id_idx on public.users(agency_id);
+create index if not exists users_client_id_idx on public.users(client_id);
+create index if not exists posts_client_id_date_idx on public.posts(client_id, scheduled_date);
+create index if not exists post_media_post_id_idx on public.post_media(post_id);
+create index if not exists comments_post_id_created_at_idx on public.comments(post_id, created_at);
+create index if not exists team_members_agency_id_idx on public.team_members(agency_id);
+create unique index if not exists team_members_access_code_idx on public.team_members(access_code);
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  requested_role public.user_role;
+  agency_row public.agencies;
+begin
+  requested_role := coalesce((new.raw_user_meta_data ->> 'role')::public.user_role, 'agency');
+
+  if requested_role = 'agency' then
+    insert into public.agencies (name, owner_id)
+    values (coalesce(new.raw_user_meta_data ->> 'agency_name', new.raw_user_meta_data ->> 'name', 'Minha agência'), new.id)
+    returning * into agency_row;
+
+    insert into public.users (id, name, email, role, agency_id)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
+      new.email,
+      'agency',
+      agency_row.id
+    );
+  elsif requested_role = 'member' then
+    insert into public.users (id, name, email, role, agency_id)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
+      new.email,
+      'member',
+      (new.raw_user_meta_data ->> 'agency_id')::uuid
+    )
+    on conflict (id) do update set
+      name = excluded.name,
+      email = excluded.email,
+      role = excluded.role,
+      agency_id = excluded.agency_id,
+      client_id = null;
+
+    update public.team_members
+    set user_id = new.id, status = 'active', updated_at = now()
+    where id = (new.raw_user_meta_data ->> 'team_member_id')::uuid;
+  else
+    insert into public.users (id, name, email, role)
+    values (
+      new.id,
+      coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
+      new.email,
+      'client'
+    )
+    on conflict (id) do update set
+      name = excluded.name,
+      email = excluded.email,
+      role = excluded.role,
+      agency_id = (new.raw_user_meta_data ->> 'agency_id')::uuid,
+      client_id = (new.raw_user_meta_data ->> 'client_id')::uuid;
+
+    update public.users
+    set
+      agency_id = (new.raw_user_meta_data ->> 'agency_id')::uuid,
+      client_id = (new.raw_user_meta_data ->> 'client_id')::uuid
+    where id = new.id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create or replace function public.get_client_invite(invite_code_input text, email_input text)
+returns table (
+  id uuid,
+  name text,
+  avatar text,
+  agency_id uuid
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select c.id, c.name, c.avatar, c.agency_id
+  from public.clients c
+  where regexp_replace(upper(c.invite_code), '[^A-Z0-9]', '', 'g') = regexp_replace(upper(invite_code_input), '[^A-Z0-9]', '', 'g')
+    and lower(trim(c.email)) = lower(trim(email_input))
+  limit 1;
+$$;
+
+grant execute on function public.get_client_invite(text, text) to anon, authenticated;
+
+create or replace function public.get_member_invite(access_code_input text, email_input text)
+returns table (
+  id uuid,
+  name text,
+  avatar text,
+  agency_id uuid,
+  role_title text
+)
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select tm.id, tm.name, tm.avatar, tm.agency_id, tm.role_title
+  from public.team_members tm
+  where regexp_replace(upper(tm.access_code), '[^A-Z0-9]', '', 'g') = regexp_replace(upper(access_code_input), '[^A-Z0-9]', '', 'g')
+    and lower(trim(tm.email)) = lower(trim(email_input))
+    and tm.status <> 'inactive'
+  limit 1;
+$$;
+
+grant execute on function public.get_member_invite(text, text) to anon, authenticated;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+alter table public.agencies enable row level security;
+alter table public.clients enable row level security;
+alter table public.users enable row level security;
+alter table public.posts enable row level security;
+alter table public.post_media enable row level security;
+alter table public.comments enable row level security;
+alter table public.team_members enable row level security;
+
+create or replace function public.current_profile()
+returns public.users
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select * from public.users where id = auth.uid();
+$$;
+
+create or replace function public.is_agency_member(target_agency_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role in ('agency', 'member')
+      and u.agency_id = target_agency_id
+  );
+$$;
+
+create or replace function public.is_agency_admin(target_agency_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role = 'agency'
+      and u.agency_id = target_agency_id
+  );
+$$;
+
+create or replace function public.can_access_client(target_client_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.users u
+    join public.clients c on c.id = target_client_id
+    where u.id = auth.uid()
+      and (
+        (u.role in ('agency', 'member') and u.agency_id = c.agency_id)
+        or
+        (u.role = 'client' and u.client_id = c.id)
+      )
+  );
+$$;
+
+drop policy if exists "users read own agency/client scope" on public.users;
+create policy "users read own agency/client scope"
+on public.users for select
+using (
+  id = auth.uid()
+  or agency_id = (public.current_profile()).agency_id
+  or client_id = (public.current_profile()).client_id
+);
+
+drop policy if exists "users update self" on public.users;
+create policy "users update self"
+on public.users for update
+using (id = auth.uid())
+with check (id = auth.uid());
+
+drop policy if exists "agencies read own" on public.agencies;
+create policy "agencies read own"
+on public.agencies for select
+using (owner_id = auth.uid() or public.is_agency_member(id));
+
+drop policy if exists "agencies insert owner" on public.agencies;
+create policy "agencies insert owner"
+on public.agencies for insert
+with check (owner_id = auth.uid());
+
+drop policy if exists "agencies update owner" on public.agencies;
+create policy "agencies update owner"
+on public.agencies for update
+using (owner_id = auth.uid())
+with check (owner_id = auth.uid());
+
+drop policy if exists "clients read scoped" on public.clients;
+create policy "clients read scoped"
+on public.clients for select
+using (public.can_access_client(id));
+
+drop policy if exists "clients agency write" on public.clients;
+create policy "clients agency write"
+on public.clients for all
+using (public.is_agency_admin(agency_id))
+with check (public.is_agency_admin(agency_id));
+
+drop policy if exists "posts read scoped" on public.posts;
+create policy "posts read scoped"
+on public.posts for select
+using (public.can_access_client(client_id));
+
+drop policy if exists "posts agency write" on public.posts;
+create policy "posts agency write"
+on public.posts for all
+using (
+  exists (
+    select 1 from public.clients c
+    where c.id = posts.client_id and public.is_agency_member(c.agency_id)
+  )
+)
+with check (
+  exists (
+    select 1 from public.clients c
+    where c.id = posts.client_id and public.is_agency_member(c.agency_id)
+  )
+);
+
+drop policy if exists "posts client approval update" on public.posts;
+create policy "posts client approval update"
+on public.posts for update
+using (public.can_access_client(client_id))
+with check (public.can_access_client(client_id));
+
+create or replace function public.enforce_client_post_approval_update()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor public.users;
+begin
+  select * into actor from public.users where id = auth.uid();
+
+  if actor.role = 'client' then
+    if new.client_id is distinct from old.client_id
+      or new.title is distinct from old.title
+      or new.caption is distinct from old.caption
+      or new.instructions is distinct from old.instructions
+      or new.scheduled_date is distinct from old.scheduled_date
+      or new.scheduled_time is distinct from old.scheduled_time
+      or new.feed_order is distinct from old.feed_order
+      or new.created_by is distinct from old.created_by
+      or new.created_at is distinct from old.created_at
+    then
+      raise exception 'Clientes só podem aprovar ou solicitar revisão de conteúdos.';
+    end if;
+
+    if not (
+      (new.status = 'approved' and new.pipeline_stage = 'approved')
+      or
+      (new.status = 'revision_requested' and new.pipeline_stage = 'revision')
+    ) then
+      raise exception 'Ação de aprovação do cliente inválida.';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_client_post_approval_update on public.posts;
+create trigger enforce_client_post_approval_update
+  before update on public.posts
+  for each row execute function public.enforce_client_post_approval_update();
+
+drop policy if exists "media read scoped" on public.post_media;
+create policy "media read scoped"
+on public.post_media for select
+using (
+  exists (
+    select 1 from public.posts p
+    where p.id = post_media.post_id and public.can_access_client(p.client_id)
+  )
+);
+
+drop policy if exists "media agency write" on public.post_media;
+create policy "media agency write"
+on public.post_media for all
+using (
+  exists (
+    select 1 from public.posts p
+    join public.clients c on c.id = p.client_id
+    where p.id = post_media.post_id and public.is_agency_member(c.agency_id)
+  )
+)
+with check (
+  exists (
+    select 1 from public.posts p
+    join public.clients c on c.id = p.client_id
+    where p.id = post_media.post_id and public.is_agency_member(c.agency_id)
+  )
+);
+
+drop policy if exists "comments read scoped" on public.comments;
+create policy "comments read scoped"
+on public.comments for select
+using (
+  exists (
+    select 1 from public.posts p
+    where p.id = comments.post_id and public.can_access_client(p.client_id)
+  )
+);
+
+drop policy if exists "comments insert scoped" on public.comments;
+create policy "comments insert scoped"
+on public.comments for insert
+with check (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.posts p
+    where p.id = comments.post_id and public.can_access_client(p.client_id)
+  )
+);
+
+drop policy if exists "comments delete own scoped" on public.comments;
+create policy "comments delete own scoped"
+on public.comments for delete
+using (
+  user_id = auth.uid()
+  and exists (
+    select 1 from public.posts p
+    where p.id = comments.post_id and public.can_access_client(p.client_id)
+  )
+);
+
+drop policy if exists "team members read agency" on public.team_members;
+create policy "team members read agency"
+on public.team_members for select
+using (public.is_agency_member(agency_id));
+
+drop policy if exists "team members agency write" on public.team_members;
+create policy "team members agency write"
+on public.team_members for all
+using (public.is_agency_admin(agency_id))
+with check (public.is_agency_admin(agency_id));
+
+drop policy if exists "team members update self" on public.team_members;
+create policy "team members update self"
+on public.team_members for update
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'post-media',
+  'post-media',
+  true,
+  262144000,
+  array['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/quicktime','video/webm']
+)
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "post media public read" on storage.objects;
+create policy "post media public read"
+on storage.objects for select
+using (bucket_id = 'post-media');
+
+drop policy if exists "agency upload post media" on storage.objects;
+create policy "agency upload post media"
+on storage.objects for insert
+with check (
+  bucket_id = 'post-media'
+  and auth.role() = 'authenticated'
+);
