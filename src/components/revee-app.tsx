@@ -63,7 +63,7 @@ import { FeedView } from "@/components/revee/feed-view";
 import { MobileNav, Sidebar, Topbar, type NotificationItem } from "@/components/revee/navigation";
 import type { AgencyWorkspace, View, ViewItem } from "@/components/revee/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { PLANS, formatCurrency, generateReferralCode, getContentLimit, getEstimatedPriceWithReferralDiscount, getLimit, getPastDueDaysLeft, getPlanLabel, getPlanPrice, getReferralDiscountAmount, getStatusLabel, shouldSuspendAccess } from "@/lib/plans";
+import { PLANS, formatCurrency, generateReferralCode, getContentLimit, getEstimatedPriceWithReferralDiscount, getLimit, getPastDueDaysLeft, getPlanLabel, getPlanPrice, getReferralDiscountAmount, getStatusLabel, getTrialDaysLeft, shouldSuspendAccess } from "@/lib/plans";
 import { cn, formatDate, initials, toInstagramHandle } from "@/lib/utils";
 import type { BillingCycle, BillingHistory, Client, Comment, ContentStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
 
@@ -631,7 +631,26 @@ export function ReveeApp() {
         .select("*")
         .eq("agency_id", nextProfile.agency_id)
         .maybeSingle();
-      const activeSubscription = subscriptionRow as Subscription | null;
+      let activeSubscription = subscriptionRow as Subscription | null;
+      if (nextProfile.role === "agency") {
+        try {
+          const { data: authSession } = await supabase.auth.getSession();
+          const response = await fetch("/api/billing/sync-exemption", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(authSession.session?.access_token ? { Authorization: `Bearer ${authSession.session.access_token}` } : {})
+            },
+            body: JSON.stringify({ agencyId: nextProfile.agency_id, email: nextProfile.email })
+          });
+          if (response.ok) {
+            const exemptionSync = await response.json();
+            if (exemptionSync?.subscription) activeSubscription = exemptionSync.subscription as Subscription;
+          }
+        } catch {
+          // Exempt accounts are a convenience check; keep the normal subscription if the sync is unavailable.
+        }
+      }
       setSubscription(activeSubscription ?? createLocalSubscription(nextProfile.agency_id, agencyDisplayName));
 
       const { data: billingRows } = await supabase
@@ -1036,19 +1055,21 @@ export function ReveeApp() {
         />
 
         <main className={cn("flex min-w-0 flex-1 flex-col pb-20 transition-[margin] duration-300 lg:pb-0", sidebarCollapsed ? "lg:ml-[84px]" : "lg:ml-[286px]")}>
-          <AgencyHero
-            workspace={{ ...workspace, name: workspace.name || agencyName }}
-            isClient={isClientUser}
-            profileRole={profile!.role}
-            notifications={notifications}
-            onClearNotifications={clearNotifications}
-            onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
-            onOpenNotification={openNotification}
-            onViewProfile={() => {
-              if (isClientUser || isAgencyUser) setAgencyProfileOpen(true);
-              else setMemberProfileOpen(true);
-            }}
-          />
+          {view === "calendar" && (
+            <AgencyHero
+              workspace={{ ...workspace, name: workspace.name || agencyName }}
+              isClient={isClientUser}
+              profileRole={profile!.role}
+              notifications={notifications}
+              onClearNotifications={clearNotifications}
+              onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
+              onOpenNotification={openNotification}
+              onViewProfile={() => {
+                if (isClientUser || isAgencyUser) setAgencyProfileOpen(true);
+                else setMemberProfileOpen(true);
+              }}
+            />
+          )}
           <Topbar
             view={view}
             views={availableViews}
@@ -1628,8 +1649,11 @@ export function ReveeApp() {
       return data;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Erro na assinatura";
-      notify(errorMessage.includes("ASAAS_API_KEY") ? "A configuração de pagamento ainda não está ativa neste ambiente." : errorMessage);
-      return null;
+      const friendlyMessage = errorMessage.includes("ASAAS_API_KEY")
+        ? "A configuração de pagamento ainda não está ativa neste ambiente."
+        : errorMessage;
+      notify(friendlyMessage);
+      return { error: true, message: friendlyMessage };
     }
   }
 
@@ -4586,7 +4610,28 @@ function MemberFormModal({
 // ─── BillingView ─────────────────────────────────────────────────────────────
 
 function BillingNotice({ subscription, onRegularize }: { subscription: Subscription | null; onRegularize: () => void }) {
-  if (!subscription || subscription.status !== "past_due") return null;
+  if (!subscription) return null;
+
+  if (subscription.status === "trial") {
+    const daysLeft = getTrialDaysLeft(subscription);
+    if (daysLeft === null || daysLeft > 3) return null;
+    const timeText = daysLeft <= 0 ? "hoje" : `em ${daysLeft} dia${daysLeft === 1 ? "" : "s"}`;
+    return (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[16px] border border-[#dac6ec] bg-[#fbf7ff] px-4 py-3 text-sm text-primary shadow-soft">
+        <div>
+          <div className="font-semibold">Seu teste gratuito termina {timeText}.</div>
+          <div className="mt-1 text-xs leading-5 text-muted">
+            Mantenha a assinatura ativa para continuar usando sem interrupção.
+          </div>
+        </div>
+        <button className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-white" onClick={onRegularize}>
+          Ver assinatura
+        </button>
+      </div>
+    );
+  }
+
+  if (subscription.status !== "past_due") return null;
   const daysLeft = getPastDueDaysLeft(subscription) ?? 5;
   return (
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[16px] border border-[#f3c7cf] bg-[#fff5f7] px-4 py-3 text-sm text-[#7b2d42] shadow-soft">

@@ -103,6 +103,13 @@ export function getPastDueDaysLeft(subscription?: Subscription | null) {
   return Math.max(0, 5 - elapsedDays);
 }
 
+export function getTrialDaysLeft(subscription?: Subscription | null) {
+  if (!subscription?.trial_ends_at) return null;
+  const endsAt = new Date(subscription.trial_ends_at).getTime();
+  if (Number.isNaN(endsAt)) return null;
+  return Math.max(0, Math.ceil((endsAt - Date.now()) / 86400000));
+}
+
 export function shouldSuspendAccess(subscription?: Subscription | null) {
   if (!subscription) return false;
   if (subscription.status === "suspended") return true;

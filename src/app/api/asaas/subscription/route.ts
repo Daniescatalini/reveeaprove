@@ -83,6 +83,7 @@ async function ensureAsaasSubscription(input: {
         plan: input.plan,
         cycle: input.billingCycle,
         value: subscriptionValue,
+        externalReference: input.agencyId,
         nextDueDate: toDateOnly(trialEndsAt) ?? getTrialDueDate()
       })
     });
@@ -165,7 +166,7 @@ export async function POST(request: Request) {
       if (asaasSubscriptionId && !applyNextCycle) {
         await asaasRequest(`/subscriptions/${asaasSubscriptionId}`, {
           method: "PUT",
-          body: asaasSubscriptionPayload({ customer: customerId, plan, cycle: billingCycle, value: subscriptionValue })
+          body: asaasSubscriptionPayload({ customer: customerId, plan, cycle: billingCycle, value: subscriptionValue, externalReference: agencyId })
         });
       } else if (!asaasSubscriptionId) {
         const trialEndsAt = getTrialEndIso(subscription);
@@ -176,6 +177,7 @@ export async function POST(request: Request) {
             plan,
             cycle: billingCycle,
             value: subscriptionValue,
+            externalReference: agencyId,
             nextDueDate: toDateOnly(trialEndsAt) ?? getTrialDueDate()
           })
         });

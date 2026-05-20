@@ -30,12 +30,22 @@ export async function POST(request: Request) {
     const event = String(payload.event ?? "");
     const payment = payload.payment ?? {};
     const asaasSubscriptionId = payment.subscription ?? payload.subscription?.id ?? null;
+    const externalAgencyId = payment.externalReference ?? payload.subscription?.externalReference ?? payload.externalReference ?? null;
 
-    const { data: subscription } = asaasSubscriptionId
+    let { data: subscription } = asaasSubscriptionId
       ? await supabaseAdmin.from("subscriptions").select("*").eq("asaas_subscription_id", asaasSubscriptionId).maybeSingle()
       : { data: null };
 
-    const agencyId = subscription?.agency_id ?? null;
+    if (!subscription && externalAgencyId) {
+      const { data: subscriptionByReference } = await supabaseAdmin
+        .from("subscriptions")
+        .select("*")
+        .eq("agency_id", externalAgencyId)
+        .maybeSingle();
+      subscription = subscriptionByReference;
+    }
+
+    const agencyId = subscription?.agency_id ?? externalAgencyId ?? null;
     await supabaseAdmin.from("billing_events").insert({
       agency_id: agencyId,
       event_type: event || "ASAAS_WEBHOOK",

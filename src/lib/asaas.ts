@@ -46,6 +46,7 @@ export function asaasSubscriptionPayload(input: {
   paymentMethod?: string | null;
   nextDueDate?: string;
   value?: number;
+  externalReference?: string;
 }) {
   return {
     customer: input.customer,
@@ -53,6 +54,7 @@ export function asaasSubscriptionPayload(input: {
     value: input.value ?? getPlanPrice(input.plan, input.cycle),
     nextDueDate: input.nextDueDate ?? getTrialDueDate(),
     cycle: input.cycle === "annual" ? "YEARLY" : "MONTHLY",
-    description: `ReveeAprove - Plano ${input.plan === "premium" ? "Premium" : input.plan === "studio" ? "Studio" : "Start"}`
+    description: `ReveeAprove - Plano ${input.plan === "premium" ? "Premium" : input.plan === "studio" ? "Studio" : "Start"}`,
+    externalReference: input.externalReference
   };
 }
