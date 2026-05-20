@@ -55,6 +55,7 @@ async function ensureAsaasSubscription(input: {
   subscription: any;
   plan: SubscriptionPlan;
   billingCycle: BillingCycle;
+  billingDocument?: string | null;
 }) {
   const activeReferralCount = await getActiveReferralCount(input.agencyId);
   const subscriptionValue = getEstimatedPriceWithReferralDiscount(input.plan, input.billingCycle, activeReferralCount);
@@ -68,10 +69,19 @@ async function ensureAsaasSubscription(input: {
       method: "POST",
       body: {
         name: input.agency?.name ?? "Agência ReveeAprove",
-        email: billingEmail
+        email: billingEmail,
+        cpfCnpj: input.billingDocument ?? undefined
       }
     });
     customerId = customer.id;
+  } else if (input.billingDocument) {
+    await asaasRequest(`/customers/${customerId}`, {
+      method: "PUT",
+      body: {
+        name: input.agency?.name ?? "Agência ReveeAprove",
+        cpfCnpj: input.billingDocument
+      }
+    });
   }
 
   if (!asaasSubscriptionId) {
@@ -157,10 +167,19 @@ export async function POST(request: Request) {
           method: "POST",
           body: {
             name: agency?.name ?? "Agência ReveeAprove",
-            email: billingEmail
+            email: billingEmail,
+            cpfCnpj: body.billingDocument ? String(body.billingDocument).replace(/\D/g, "") : undefined
           }
         });
         customerId = customer.id;
+      } else if (body.billingDocument) {
+        await asaasRequest(`/customers/${customerId}`, {
+          method: "PUT",
+          body: {
+            name: agency?.name ?? "Agência ReveeAprove",
+            cpfCnpj: String(body.billingDocument).replace(/\D/g, "")
+          }
+        });
       }
 
       if (asaasSubscriptionId && !applyNextCycle) {
@@ -252,7 +271,11 @@ export async function POST(request: Request) {
 
       const plan = (body.plan ?? subscription?.plan ?? "studio") as SubscriptionPlan;
       const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
-      const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle });
+      const billingDocument = body.billingDocument ? String(body.billingDocument).replace(/\D/g, "") : null;
+      if (!subscription?.asaas_customer_id && !billingDocument) {
+        return NextResponse.json({ error: "Informe o CPF ou CNPJ para ativar o teste gratuito." }, { status: 400 });
+      }
+      const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle, billingDocument });
       const payment = await getLatestSubscriptionPayment(ensured.asaasSubscriptionId);
       const invoiceUrl = getPaymentUrl(payment) ?? ensured.initialPaymentUrl;
 

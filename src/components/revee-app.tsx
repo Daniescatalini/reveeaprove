@@ -1007,7 +1007,7 @@ export function ReveeApp() {
       <TrialActivationGate
         agencyName={agencyName}
         subscription={subscription}
-        onActivate={(plan, billingCycle) => billingAction("payment_link", { plan, billingCycle })}
+        onActivate={(plan, billingCycle, billingDocument) => billingAction("payment_link", { plan, billingCycle, billingDocument })}
         onLogout={handleLogout}
       />
     );
@@ -1861,18 +1861,24 @@ function TrialActivationGate({
 }: {
   agencyName: string;
   subscription: Subscription | null;
-  onActivate: (plan: SubscriptionPlan, cycle: BillingCycle) => Promise<any>;
+  onActivate: (plan: SubscriptionPlan, cycle: BillingCycle, billingDocument: string) => Promise<any>;
   onLogout: () => Promise<void>;
 }) {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(subscription?.plan ?? "studio");
   const [cycle, setCycle] = useState<BillingCycle>(subscription?.billing_cycle ?? "monthly");
+  const [billingDocument, setBillingDocument] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   async function activate() {
+    const cleanDocument = billingDocument.replace(/\D/g, "");
+    if (![11, 14].includes(cleanDocument.length)) {
+      setMessage("Informe o CPF ou CNPJ para ativar o teste gratuito.");
+      return;
+    }
     setBusy(true);
     setMessage("");
-    const data = await onActivate(selectedPlan, cycle);
+    const data = await onActivate(selectedPlan, cycle, cleanDocument);
     if (!data?.checkoutUrl) {
       setMessage(data?.message ?? "Estamos preparando sua tela de ativação. Tente novamente em alguns segundos.");
     }
@@ -1973,6 +1979,16 @@ function TrialActivationGate({
               })}
             </div>
 
+            <div className="mt-4">
+              <Field
+                label="CPF ou CNPJ"
+                value={billingDocument}
+                onChange={setBillingDocument}
+                placeholder="Necessário para ativar a cobrança"
+                inputMode="numeric"
+              />
+            </div>
+
             {message && <div className="mt-4 rounded-xl bg-accent-light px-4 py-3 text-sm font-medium text-accent-dark">{message}</div>}
 
             <button
@@ -2012,11 +2028,24 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const ref = new URLSearchParams(window.location.search).get("ref");
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    const confirmed = params.get("confirmed");
+    const authError = params.get("auth_error");
     if (ref) {
       setMode("signup");
       setRole("agency");
       setInviteCode(ref);
+    }
+    if (confirmed) {
+      setMode("login");
+      setMessage("E-mail confirmado. Agora é só entrar com sua senha.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (authError) {
+      setMode("login");
+      setMessage("Não conseguimos confirmar esse link. Peça um novo e tente outra vez.");
+      window.history.replaceState({}, "", window.location.pathname);
     }
   }, [setMode]);
 
@@ -2067,7 +2096,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
                   agency_id: memberRow.agency_id,
                   team_member_id: memberRow.id
                 },
-                emailRedirectTo: `${window.location.origin}`
+                emailRedirectTo: `${window.location.origin}/auth/callback`
               }
             });
 
@@ -2117,7 +2146,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
                 client_id: clientRow.id,
                 agency_id: clientRow.agency_id
               },
-              emailRedirectTo: `${window.location.origin}`
+              emailRedirectTo: `${window.location.origin}/auth/callback`
             }
           });
 
@@ -2153,7 +2182,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
               agency_name: agencyNameInput || name,
               referral_code: inviteCode.trim() || null
             },
-            emailRedirectTo: `${window.location.origin}`
+            emailRedirectTo: `${window.location.origin}/auth/callback`
           }
         });
         setMessage(error ? error.message : "Enviamos a confirmação para o seu e-mail.");
@@ -2289,13 +2318,15 @@ function Field({
   value,
   onChange,
   placeholder,
-  type = "text"
+  type = "text",
+  inputMode
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   type?: string;
+  inputMode?: "text" | "numeric" | "decimal" | "tel" | "search" | "email" | "url";
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = type === "password";
@@ -2305,6 +2336,7 @@ function Field({
       <div className="relative">
         <input
           type={isPassword && showPassword ? "text" : type}
+          inputMode={inputMode}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
