@@ -386,7 +386,7 @@ async function cropAvatarFile(file: File, zoom: number) {
 function createLocalSubscription(agencyId: string, seed: string): Subscription {
   const now = new Date();
   const periodEnd = new Date(now);
-  periodEnd.setMonth(periodEnd.getMonth() + 1);
+  periodEnd.setDate(periodEnd.getDate() + 7);
   return {
     id: `local-subscription-${agencyId}`,
     agency_id: agencyId,
@@ -400,6 +400,12 @@ function createLocalSubscription(agencyId: string, seed: string): Subscription {
     created_at: now.toISOString(),
     updated_at: now.toISOString()
   };
+}
+
+function hasActivatedBilling(subscription?: Subscription | null) {
+  if (!subscription) return false;
+  if (subscription.status === "exempt") return true;
+  return Boolean(subscription.asaas_subscription_id);
 }
 
 export function ReveeApp() {
@@ -973,6 +979,17 @@ export function ReveeApp() {
           setActiveClientId(seedClients[0].id);
           setAgencyName("Revee Studio");
         }}
+      />
+    );
+  }
+
+  if (isAgencyUser && !hasActivatedBilling(subscription)) {
+    return (
+      <TrialActivationGate
+        agencyName={agencyName}
+        subscription={subscription}
+        onActivate={(plan, billingCycle) => billingAction("payment_link", { plan, billingCycle })}
+        onLogout={handleLogout}
       />
     );
   }
@@ -1595,7 +1612,7 @@ export function ReveeApp() {
   }
 
   async function billingAction(action: string, payload: Record<string, unknown> = {}) {
-    if (!profile?.agency_id) return;
+    if (!profile?.agency_id) return null;
     try {
       const response = await fetch("/api/asaas/subscription", {
         method: "POST",
@@ -1608,8 +1625,10 @@ export function ReveeApp() {
       if (data.billingHistory) setBillingHistory(data.billingHistory);
       if (data.checkoutUrl) window.open(data.checkoutUrl, "_blank", "noopener,noreferrer");
       notify(data.message ?? "Assinatura atualizada");
+      return data;
     } catch (error) {
       notify(error instanceof Error ? error.message : "Erro na assinatura");
+      return null;
     }
   }
 
@@ -1804,6 +1823,133 @@ function FullScreenLoader() {
       <div className="flex flex-col items-center gap-4">
         <ReveeLogo tone="light" className="h-7" />
         <Loader2 className="h-6 w-6 animate-spin text-accent" />
+      </div>
+    </div>
+  );
+}
+
+function TrialActivationGate({
+  agencyName,
+  subscription,
+  onActivate,
+  onLogout
+}: {
+  agencyName: string;
+  subscription: Subscription | null;
+  onActivate: (plan: SubscriptionPlan, cycle: BillingCycle) => Promise<any>;
+  onLogout: () => Promise<void>;
+}) {
+  const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(subscription?.plan ?? "studio");
+  const [cycle, setCycle] = useState<BillingCycle>(subscription?.billing_cycle ?? "monthly");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function activate() {
+    setBusy(true);
+    setMessage("");
+    const data = await onActivate(selectedPlan, cycle);
+    if (!data?.checkoutUrl) {
+      setMessage(data?.message ?? "Criamos sua assinatura, mas o link do Asaas ainda não apareceu. Tente novamente em alguns segundos.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="min-h-screen bg-primary px-4 py-6 text-white sm:px-6 lg:px-10">
+      <div className="mx-auto flex min-h-[calc(100vh-48px)] max-w-6xl flex-col">
+        <header className="flex items-center justify-between gap-4">
+          <ReveeLogo tone="light" className="h-7 max-w-[230px] object-contain" />
+          <button className="rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white/80 transition hover:border-white/40 hover:text-white" onClick={() => void onLogout()}>
+            Sair
+          </button>
+        </header>
+
+        <main className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[0.92fr_1.08fr]">
+          <section>
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white/75">
+              <ShieldCheck className="h-4 w-4" />
+              7 dias grátis
+            </div>
+            <h1 className="max-w-xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-5xl">
+              Ative seu teste para entrar no ReveeAprove.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-8 text-white/70">
+              Olá, {agencyName}. Escolha um plano, cadastre a forma de pagamento no ambiente seguro do Asaas e comece a usar agora. A primeira cobrança fica para depois do período gratuito.
+            </p>
+            <div className="mt-8 grid gap-3 text-sm text-white/78 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Checkout seguro no Asaas</div>
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Cobrança só após 7 dias</div>
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Cancele quando quiser</div>
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-white/10 bg-white p-4 text-primary shadow-modal sm:p-6">
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-semibold tracking-[-0.03em]">Escolha seu plano</h2>
+                <p className="mt-1 text-sm text-muted">Você pode trocar depois em Minha assinatura.</p>
+              </div>
+              <div className="inline-flex rounded-full border border-line bg-canvas p-1">
+                {(["monthly", "annual"] as BillingCycle[]).map((item) => (
+                  <button
+                    key={item}
+                    className={cn("rounded-full px-4 py-2 text-xs font-semibold transition", cycle === item ? "bg-white text-primary shadow-soft" : "text-muted")}
+                    onClick={() => setCycle(item)}
+                  >
+                    {item === "monthly" ? "Mensal" : "Anual"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-3">
+              {(Object.keys(PLANS) as SubscriptionPlan[]).map((plan) => {
+                const config = PLANS[plan];
+                const selected = selectedPlan === plan;
+                return (
+                  <button
+                    key={plan}
+                    className={cn(
+                      "rounded-2xl border p-4 text-left transition hover:border-accent",
+                      selected ? "border-accent bg-accent-light/40 shadow-soft" : "border-line bg-white"
+                    )}
+                    onClick={() => setSelectedPlan(plan)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-lg font-semibold">
+                          {config.name}
+                          {plan === "premium" && <Crown className="h-4 w-4 text-accent-dark" />}
+                        </div>
+                        <div className="mt-1 text-sm text-muted">
+                          {config.clientLimit === null ? "Clientes ilimitados" : `Até ${config.clientLimit} clientes`} · {config.memberLimit ? `até ${config.memberLimit} membros` : "sem membros"}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-semibold">{formatCurrency(getPlanPrice(plan, cycle))}</div>
+                        <div className="text-xs text-muted">{cycle === "annual" ? "por ano" : "por mês"}</div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {message && <div className="mt-4 rounded-xl bg-accent-light px-4 py-3 text-sm font-medium text-accent-dark">{message}</div>}
+
+            <button
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#2d1870] disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={() => void activate()}
+              disabled={busy}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+              Começar teste grátis
+            </button>
+            <p className="mt-3 text-center text-xs leading-5 text-muted">
+              O pagamento é processado fora do ReveeAprove. A chave do Asaas fica protegida no backend.
+            </p>
+          </section>
+        </main>
       </div>
     </div>
   );

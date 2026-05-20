@@ -233,8 +233,8 @@ export async function POST(request: Request) {
         });
       }
 
-      const plan = (subscription?.plan ?? "studio") as SubscriptionPlan;
-      const billingCycle = (subscription?.billing_cycle ?? "monthly") as BillingCycle;
+      const plan = (body.plan ?? subscription?.plan ?? "studio") as SubscriptionPlan;
+      const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
       const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle });
       const payment = await getLatestSubscriptionPayment(ensured.asaasSubscriptionId);
       const invoiceUrl = getPaymentUrl(payment);
