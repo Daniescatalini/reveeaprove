@@ -36,7 +36,7 @@ export async function asaasRequest<T>(path: string, options: AsaasRequestOptions
 export function asaasBillingType(paymentMethod?: string | null) {
   if (paymentMethod === "credit_card") return "CREDIT_CARD";
   if (paymentMethod === "pix") return "PIX";
-  return "BOLETO";
+  return "UNDEFINED";
 }
 
 export function asaasSubscriptionPayload(input: {
