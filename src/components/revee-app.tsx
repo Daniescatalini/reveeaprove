@@ -673,7 +673,7 @@ export function ReveeApp() {
       try {
         const savedWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
         setWorkspace(savedWorkspace
-          ? { ...defaultWorkspace, name: agencyDisplayName, ...JSON.parse(savedWorkspace) }
+          ? { ...defaultWorkspace, ...JSON.parse(savedWorkspace), name: agencyDisplayName }
           : { ...defaultWorkspace, name: agencyDisplayName });
       } catch {
         setWorkspace({ ...defaultWorkspace, name: agencyDisplayName });
@@ -1006,11 +1006,16 @@ export function ReveeApp() {
   }
 
   const saveWorkspace = useCallback((nextWorkspace: AgencyWorkspace) => {
-    setWorkspace(nextWorkspace);
+    const agencyScopedWorkspace = { ...nextWorkspace, name: nextWorkspace.name.trim() || agencyName };
+    setWorkspace(agencyScopedWorkspace);
+    if (agencyScopedWorkspace.name !== agencyName) setAgencyName(agencyScopedWorkspace.name);
     if (profile?.agency_id) {
-      window.localStorage.setItem(`revee-workspace-${profile.agency_id}`, JSON.stringify(nextWorkspace));
+      window.localStorage.setItem(`revee-workspace-${profile.agency_id}`, JSON.stringify(agencyScopedWorkspace));
+      supabase?.from("agencies").update({ name: agencyScopedWorkspace.name }).eq("id", profile.agency_id).then(({ error }) => {
+        if (error) notify(error.message);
+      });
     }
-  }, [profile?.agency_id]);
+  }, [agencyName, profile?.agency_id]);
 
   async function saveOwnProfile(input: { name: string; avatar_file?: File | null }) {
     if (!profile) return;
@@ -1137,7 +1142,7 @@ export function ReveeApp() {
         <Sidebar
           profile={profile}
           agencyName={agencyName}
-          workspace={{ ...workspace, name: workspace.name || agencyName }}
+          workspace={{ ...workspace, name: agencyName }}
           activeClient={activeClient}
           clients={clients}
           activeClientId={activeClientId}
@@ -1170,7 +1175,7 @@ export function ReveeApp() {
         <main className={cn("flex min-w-0 flex-1 flex-col pb-20 transition-[margin] duration-300 lg:pb-0", sidebarCollapsed ? "lg:ml-[84px]" : "lg:ml-[286px]")}>
           {view === "calendar" && (
             <AgencyHero
-              workspace={{ ...workspace, name: workspace.name || agencyName }}
+              workspace={{ ...workspace, name: agencyName }}
               isClient={isClientUser}
               profileRole={profile!.role}
               notifications={notifications}
@@ -1307,7 +1312,7 @@ export function ReveeApp() {
                     />
                   )}
                   {view === "workspace" && isAgencyUser && (
-                    <WorkspaceView workspace={{ ...workspace, name: workspace.name || agencyName }} onEdit={() => setWorkspaceModalOpen(true)} />
+                    <WorkspaceView workspace={{ ...workspace, name: agencyName }} onEdit={() => setWorkspaceModalOpen(true)} />
                   )}
                 </motion.div>
               </AnimatePresence>
@@ -1381,7 +1386,7 @@ export function ReveeApp() {
 
       <WorkspaceModal
         open={workspaceModalOpen && isAgencyUser}
-        workspace={{ ...workspace, name: workspace.name || agencyName }}
+        workspace={{ ...workspace, name: agencyName }}
         onClose={() => setWorkspaceModalOpen(false)}
         onAutoSave={saveWorkspace}
         onUploadImage={uploadProfileImage}
@@ -1389,7 +1394,7 @@ export function ReveeApp() {
 
       <AgencyProfileModal
         open={agencyProfileOpen}
-        workspace={{ ...workspace, name: workspace.name || agencyName }}
+        workspace={{ ...workspace, name: agencyName }}
         email={profile?.email ?? ""}
         onClose={() => setAgencyProfileOpen(false)}
         canEdit={isAgencyUser}
