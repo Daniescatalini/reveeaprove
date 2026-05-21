@@ -36,8 +36,11 @@ create table if not exists public.agencies (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   owner_id uuid not null references auth.users(id) on delete cascade,
+  billing_document text,
   created_at timestamptz not null default now()
 );
+
+alter table public.agencies add column if not exists billing_document text;
 
 create table if not exists public.clients (
   id uuid primary key default gen_random_uuid(),
@@ -75,6 +78,7 @@ create table if not exists public.posts (
   instructions text,
   status public.content_status not null default 'draft',
   pipeline_stage public.pipeline_stage not null default 'needs_design',
+  content_format text default 'static' check (content_format in ('static', 'carousel', 'video')),
   scheduled_date date not null,
   scheduled_time time,
   feed_order integer not null default 0,
@@ -92,14 +96,18 @@ alter table public.posts add column if not exists approved_at timestamptz;
 alter table public.posts add column if not exists revision_requested_at timestamptz;
 alter table public.posts add column if not exists scheduled_at timestamptz;
 alter table public.posts add column if not exists updated_at timestamptz not null default now();
+alter table public.posts add column if not exists content_format text default 'static' check (content_format in ('static', 'carousel', 'video'));
 
 create table if not exists public.post_media (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
   media_url text not null,
   media_type text not null check (media_type in ('image', 'video')),
+  thumbnail_url text,
   order_index integer not null default 0
 );
+
+alter table public.post_media add column if not exists thumbnail_url text;
 
 create table if not exists public.comments (
   id uuid primary key default gen_random_uuid(),
@@ -145,8 +153,12 @@ begin
   requested_role := coalesce((new.raw_user_meta_data ->> 'role')::public.user_role, 'agency');
 
   if requested_role = 'agency' then
-    insert into public.agencies (name, owner_id)
-    values (coalesce(new.raw_user_meta_data ->> 'agency_name', new.raw_user_meta_data ->> 'name', 'Minha agência'), new.id)
+    insert into public.agencies (name, owner_id, billing_document)
+    values (
+      coalesce(new.raw_user_meta_data ->> 'agency_name', new.raw_user_meta_data ->> 'name', 'Minha agência'),
+      new.id,
+      nullif(regexp_replace(coalesce(new.raw_user_meta_data ->> 'billing_document', ''), '\D', '', 'g'), '')
+    )
     returning * into agency_row;
 
     insert into public.users (id, name, email, role, agency_id)
@@ -217,7 +229,7 @@ as $$
   select c.id, c.name, c.avatar, c.agency_id
   from public.clients c
   where regexp_replace(upper(c.invite_code), '[^A-Z0-9]', '', 'g') = regexp_replace(upper(invite_code_input), '[^A-Z0-9]', '', 'g')
-    and lower(trim(c.email)) = lower(trim(email_input))
+    and lower(regexp_replace(coalesce(c.email, ''), '\s+', '', 'g')) = lower(regexp_replace(coalesce(email_input, ''), '\s+', '', 'g'))
   limit 1;
 $$;
 

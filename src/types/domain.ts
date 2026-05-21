@@ -19,6 +19,7 @@ export type PipelineStage =
   | "published";
 
 export type MediaType = "image" | "video";
+export type ContentFormat = "static" | "carousel" | "video";
 
 export type Profile = {
   id: string;
@@ -34,6 +35,7 @@ export type Agency = {
   id: string;
   name: string;
   owner_id: string;
+  billing_document?: string | null;
 };
 
 export type Client = {
@@ -53,6 +55,7 @@ export type PostMedia = {
   post_id: string;
   media_url: string;
   media_type: MediaType;
+  thumbnail_url?: string | null;
   order_index: number;
 };
 
@@ -64,6 +67,7 @@ export type Post = {
   instructions?: string | null;
   status: ContentStatus;
   pipeline_stage: PipelineStage;
+  content_format?: ContentFormat | null;
   scheduled_date: string;
   scheduled_time?: string | null;
   feed_order: number;

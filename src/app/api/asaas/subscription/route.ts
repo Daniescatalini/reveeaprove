@@ -49,6 +49,16 @@ function getPaymentUrl(payment: any) {
   return payment?.invoiceUrl ?? payment?.bankSlipUrl ?? payment?.paymentLink ?? payment?.transactionReceiptUrl ?? null;
 }
 
+function normalizeBillingDocument(value?: unknown) {
+  const digits = value ? String(value).replace(/\D/g, "") : "";
+  return digits || null;
+}
+
+async function persistBillingDocument(agencyId: string, document?: string | null) {
+  if (!document) return;
+  await supabaseAdmin!.from("agencies").update({ billing_document: document }).eq("id", agencyId);
+}
+
 async function ensureAsaasSubscription(input: {
   agencyId: string;
   agency: any;
@@ -192,6 +202,8 @@ export async function POST(request: Request) {
       const applyNextCycle = Boolean(body.applyNextCycle);
       const activeReferralCount = await getActiveReferralCount(agencyId);
       const subscriptionValue = getEstimatedPriceWithReferralDiscount(plan, billingCycle, activeReferralCount);
+      const billingDocument = normalizeBillingDocument(body.billingDocument) ?? normalizeBillingDocument(agency?.billing_document);
+      await persistBillingDocument(agencyId, normalizeBillingDocument(body.billingDocument));
 
       let asaasSubscriptionId = subscription?.asaas_subscription_id ?? null;
       let customerId = subscription?.asaas_customer_id ?? null;
@@ -203,16 +215,16 @@ export async function POST(request: Request) {
           body: {
             name: agency?.name ?? "Agência ReveeAprove",
             email: billingEmail,
-            cpfCnpj: body.billingDocument ? String(body.billingDocument).replace(/\D/g, "") : undefined
+            cpfCnpj: billingDocument ?? undefined
           }
         });
         customerId = customer.id;
-      } else if (body.billingDocument) {
+      } else if (billingDocument) {
         await asaasRequest(`/customers/${customerId}`, {
           method: "PUT",
           body: {
             name: agency?.name ?? "Agência ReveeAprove",
-            cpfCnpj: String(body.billingDocument).replace(/\D/g, "")
+            cpfCnpj: billingDocument
           }
         });
       }
@@ -307,7 +319,8 @@ export async function POST(request: Request) {
 
       const plan = (body.plan ?? subscription?.plan ?? "studio") as SubscriptionPlan;
       const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
-      const billingDocument = body.billingDocument ? String(body.billingDocument).replace(/\D/g, "") : null;
+      const billingDocument = normalizeBillingDocument(body.billingDocument) ?? normalizeBillingDocument(agency?.billing_document);
+      await persistBillingDocument(agencyId, normalizeBillingDocument(body.billingDocument));
       if (!subscription?.asaas_customer_id && !billingDocument) {
         return NextResponse.json({ error: "Informe o CPF ou CNPJ para abrir o pagamento." }, { status: 400 });
       }

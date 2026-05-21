@@ -155,8 +155,12 @@ begin
   referral_input := nullif(regexp_replace(upper(coalesce(new.raw_user_meta_data ->> 'referral_code', '')), '[^A-Z0-9]', '', 'g'), '');
 
   if requested_role = 'agency' then
-    insert into public.agencies (name, owner_id)
-    values (coalesce(new.raw_user_meta_data ->> 'agency_name', new.raw_user_meta_data ->> 'name', 'Minha agência'), new.id)
+    insert into public.agencies (name, owner_id, billing_document)
+    values (
+      coalesce(new.raw_user_meta_data ->> 'agency_name', new.raw_user_meta_data ->> 'name', 'Minha agência'),
+      new.id,
+      nullif(regexp_replace(coalesce(new.raw_user_meta_data ->> 'billing_document', ''), '\D', '', 'g'), '')
+    )
     returning id into new_agency_id;
 
     insert into public.users (id, name, email, role, agency_id)

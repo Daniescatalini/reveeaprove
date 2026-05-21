@@ -1,4 +1,4 @@
-import type { ContentStatus, MediaType, PipelineStage, TeamMember, UserRole } from "@/types/domain";
+import type { ContentFormat, ContentStatus, MediaType, PipelineStage, TeamMember, UserRole } from "@/types/domain";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -25,8 +25,8 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["users"]["Row"]>;
       };
       agencies: {
-        Row: { id: string; name: string; owner_id: string; created_at: string };
-        Insert: { id?: string; name: string; owner_id: string; created_at?: string };
+        Row: { id: string; name: string; owner_id: string; billing_document: string | null; created_at: string };
+        Insert: { id?: string; name: string; owner_id: string; billing_document?: string | null; created_at?: string };
         Update: Partial<Database["public"]["Tables"]["agencies"]["Row"]>;
       };
       clients: {
@@ -57,6 +57,7 @@ export type Database = {
           instructions: string | null;
           status: ContentStatus;
           pipeline_stage: PipelineStage;
+          content_format: ContentFormat | null;
           scheduled_date: string;
           scheduled_time: string | null;
           feed_order: number;
@@ -81,6 +82,7 @@ export type Database = {
           post_id: string;
           media_url: string;
           media_type: MediaType;
+          thumbnail_url: string | null;
           order_index: number;
         };
         Insert: Partial<Database["public"]["Tables"]["post_media"]["Row"]> & {

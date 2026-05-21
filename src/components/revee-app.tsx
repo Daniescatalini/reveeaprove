@@ -65,13 +65,13 @@ import type { AgencyWorkspace, View, ViewItem } from "@/components/revee/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { PLANS, formatCurrency, generateReferralCode, getContentLimit, getEstimatedPriceWithReferralDiscount, getLimit, getPastDueDaysLeft, getPlanLabel, getPlanPrice, getReferralDiscountAmount, getStatusLabel, getTrialDaysLeft, shouldSuspendAccess } from "@/lib/plans";
 import { cn, formatDate, initials, toInstagramHandle } from "@/lib/utils";
-import type { BillingCycle, BillingHistory, Client, Comment, ContentStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
+import type { BillingCycle, BillingHistory, Client, Comment, ContentFormat, ContentStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
 
 type AuthMode = "login" | "signup" | "forgot" | "reset" | "confirm";
 type ClientInvite = Pick<Client, "id" | "name" | "avatar" | "agency_id">;
 type MemberInvite = Pick<TeamMember, "id" | "name" | "avatar" | "agency_id" | "role_title">;
 type StatusFilter = "all" | ContentStatus;
-type TypeFilter = "all" | "image" | "video" | "carousel";
+type TypeFilter = "all" | ContentFormat;
 
 const statusMeta: Record<ContentStatus, { label: string; color: string; bg: string }> = {
   draft: { label: "Rascunho", color: "#6f6a86", bg: "#f7f6fa" },
@@ -301,7 +301,7 @@ function normalizeInviteCode(value: string) {
 }
 
 function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
+  return value.replace(/\s+/g, "").trim().toLowerCase();
 }
 
 function formatPhone(value: string) {
@@ -317,17 +317,108 @@ function formatPhone(value: string) {
   return `${hasPlus ? "+" : ""}${digits.replace(/(\d{1,4})(?=\d)/g, "$1 ").trim()}`;
 }
 
-function getPostType(post: Post): TypeFilter {
+function onlyDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function formatCpfCnpj(value: string) {
+  const digits = onlyDigits(value).slice(0, 14);
+  if (digits.length <= 11) {
+    return digits
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+  }
+  return digits
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\d{4})(\d{1,2})$/, "$1-$2");
+}
+
+function isCpfOrCnpj(value: string) {
+  const digits = onlyDigits(value);
+  return digits.length === 11 || digits.length === 14;
+}
+
+const contentFormatLabels: Record<ContentFormat, string> = {
+  static: "Post estático",
+  carousel: "Carrossel",
+  video: "Vídeo"
+};
+
+function getPostType(post: Post): ContentFormat {
+  if (post.content_format) return post.content_format;
+  if (post.media.some((item) => item.media_type === "video")) return "video";
   if (post.media.length > 1) return "carousel";
-  if (post.media[0]?.media_type === "video") return "video";
-  return "image";
+  return "static";
 }
 
 function getPostTypeLabel(post: Post) {
   const type = getPostType(post);
-  if (type === "carousel") return `${post.media.length} slides`;
-  if (type === "video") return "Vídeo";
-  return "Imagem";
+  if (type === "carousel") return post.media.length > 1 ? `${post.media.length} slides` : "Carrossel";
+  return contentFormatLabels[type];
+}
+
+function defaultStageForStatus(status: ContentStatus): PipelineStage {
+  if (status === "awaiting_approval") return "waiting_client";
+  if (status === "revision_requested") return "revision";
+  if (status === "approved") return "approved";
+  if (status === "published") return "published";
+  return "needs_design";
+}
+
+function getMediaPreviewUrl(media?: PostMedia | null) {
+  if (!media) return "";
+  return media.media_type === "video" ? media.thumbnail_url || media.media_url : media.media_url;
+}
+
+async function createVideoThumbnailFile(file: File) {
+  if (typeof document === "undefined") return null;
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = url;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error("Tempo esgotado ao gerar capa.")), 7000);
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(new Error("Não foi possível ler o vídeo."));
+      };
+    });
+
+    video.currentTime = Math.min(0.2, Math.max(0, (video.duration || 1) / 10));
+    await new Promise<void>((resolve) => {
+      const timeout = window.setTimeout(resolve, 1200);
+      video.onseeked = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+    });
+
+    const canvas = document.createElement("canvas");
+    const width = video.videoWidth || 1080;
+    const height = video.videoHeight || 1350;
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(video, 0, 0, width, height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+    return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "-capa.jpg"), { type: "image/jpeg" }) : null;
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function composePostDateTime(date: string, time?: string | null) {
@@ -430,11 +521,13 @@ export function ReveeApp() {
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [postFormOpen, setPostFormOpen] = useState(false);
+  const [newPostDate, setNewPostDate] = useState(new Date().toISOString().slice(0, 10));
   const [clientFormOpen, setClientFormOpen] = useState(false);
   const [memberFormOpen, setMemberFormOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<TeamMember | null>(null);
   const [pendingDeletePostId, setPendingDeletePostId] = useState<string | null>(null);
   const [agencyName, setAgencyName] = useState("Revee Studio");
+  const [agencyBillingDocument, setAgencyBillingDocument] = useState("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -474,6 +567,7 @@ export function ReveeApp() {
       else {
         loadedUserIdRef.current = null;
         setProfile(null);
+        setAgencyBillingDocument("");
         setLoading(false);
       }
     });
@@ -484,10 +578,8 @@ export function ReveeApp() {
   useEffect(() => {
     try {
       const savedTheme = window.localStorage.getItem("revee-theme");
-      const savedWorkspace = window.localStorage.getItem("revee-workspace");
       const savedDismissedNotifications = window.localStorage.getItem("revee-dismissed-notifications");
       if (savedTheme === "dark") setDarkMode(true);
-      if (savedWorkspace) setWorkspace({ ...defaultWorkspace, ...JSON.parse(savedWorkspace) });
       if (savedDismissedNotifications) setDismissedNotificationIds(JSON.parse(savedDismissedNotifications));
     } catch {
       // Local preferences are optional; ignore invalid stored values.
@@ -575,8 +667,17 @@ export function ReveeApp() {
 
     let agencyDisplayName = nextProfile.name;
     if (nextProfile.agency_id) {
-      const { data: agency } = await supabase.from("agencies").select("name").eq("id", nextProfile.agency_id).maybeSingle();
+      const { data: agency } = await supabase.from("agencies").select("name,billing_document").eq("id", nextProfile.agency_id).maybeSingle();
       agencyDisplayName = agency?.name ?? nextProfile.name;
+      setAgencyBillingDocument(agency?.billing_document ? formatCpfCnpj(agency.billing_document) : "");
+      try {
+        const savedWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
+        setWorkspace(savedWorkspace
+          ? { ...defaultWorkspace, name: agencyDisplayName, ...JSON.parse(savedWorkspace) }
+          : { ...defaultWorkspace, name: agencyDisplayName });
+      } catch {
+        setWorkspace({ ...defaultWorkspace, name: agencyDisplayName });
+      }
     }
     setAgencyName(agencyDisplayName);
 
@@ -710,6 +811,11 @@ export function ReveeApp() {
 
   function changeView(nextView: View) {
     setView(canAccessView(nextView) ? nextView : "calendar");
+  }
+
+  function openNewPost(date?: string) {
+    setNewPostDate(date || new Date().toISOString().slice(0, 10));
+    setPostFormOpen(true);
   }
 
   function openNotification(item: NotificationItem) {
@@ -901,8 +1007,10 @@ export function ReveeApp() {
 
   const saveWorkspace = useCallback((nextWorkspace: AgencyWorkspace) => {
     setWorkspace(nextWorkspace);
-    window.localStorage.setItem("revee-workspace", JSON.stringify(nextWorkspace));
-  }, []);
+    if (profile?.agency_id) {
+      window.localStorage.setItem(`revee-workspace-${profile.agency_id}`, JSON.stringify(nextWorkspace));
+    }
+  }, [profile?.agency_id]);
 
   async function saveOwnProfile(input: { name: string; avatar_file?: File | null }) {
     if (!profile) return;
@@ -950,6 +1058,9 @@ export function ReveeApp() {
     setPosts([]);
     setComments([]);
     setTeamMembers([]);
+    setAgencyName("Revee Studio");
+    setWorkspace(defaultWorkspace);
+    setAgencyBillingDocument("");
   }
 
   if (loading) return <FullScreenLoader />;
@@ -1088,19 +1199,19 @@ export function ReveeApp() {
             clients={clients}
             activeClientId={activeClientId}
             setActiveClientId={setActiveClientId}
-            onNewPost={() => canCreateContent && setPostFormOpen(true)}
+            onNewPost={() => canCreateContent && openNewPost()}
             onOpenMobileSidebar={() => setMobileSidebarOpen(true)}
             notifications={notifications}
             onClearNotifications={clearNotifications}
             onOpenNotification={openNotification}
           />
           <div className="glass-scroll flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6">
-            {isAgencyUser && <BillingNotice subscription={subscription} onRegularize={() => void billingAction("payment_link")} />}
+            {isAgencyUser && <BillingNotice subscription={subscription} onRegularize={() => void billingPaymentAction("payment_link")} />}
             {isAgencyUser && shouldSuspendAccess(subscription) ? (
               <SubscriptionBlocked
                 subscription={subscription}
-                onRegularize={() => void billingAction("payment_link")}
-                onUpdatePayment={() => void billingAction("update_payment")}
+                onRegularize={() => void billingPaymentAction("payment_link")}
+                onUpdatePayment={() => void billingPaymentAction("update_payment")}
               />
             ) : !activeClient && view !== "team" && view !== "billing" ? (
               <EmptyState
@@ -1122,7 +1233,7 @@ export function ReveeApp() {
                       stats={stats}
                       isClient={isClientUser}
                       onOpenPost={setSelectedPost}
-                      onNewPost={() => canCreateContent && setPostFormOpen(true)}
+                      onNewPost={(date) => canCreateContent && openNewPost(date)}
                       onMovePost={async (postId, date) => updatePost(postId, { scheduled_date: date })}
                       onStatusFilter={setStatusFilter}
                     />
@@ -1183,6 +1294,7 @@ export function ReveeApp() {
                   {view === "billing" && isAgencyUser && (
                     <BillingView
                       agencyName={agencyName}
+                      billingDocument={agencyBillingDocument}
                       subscription={subscription}
                       history={billingHistory}
                       referrals={referrals}
@@ -1190,8 +1302,8 @@ export function ReveeApp() {
                       onChangePlan={changePlan}
                       onCancel={cancelSubscription}
                       onReactivate={reactivateSubscription}
-                      onPaymentLink={() => void billingAction("payment_link")}
-                      onUpdatePayment={() => void billingAction("update_payment")}
+                      onPaymentLink={() => void billingPaymentAction("payment_link")}
+                      onUpdatePayment={() => void billingPaymentAction("update_payment")}
                     />
                   )}
                   {view === "workspace" && isAgencyUser && (
@@ -1204,7 +1316,7 @@ export function ReveeApp() {
         </main>
       </div>
 
-      <MobileNav view={view} setView={changeView} isClient={isClientUser} views={primaryViews} canCreateContent={canCreateContent} onNewPost={() => setPostFormOpen(true)} />
+      <MobileNav view={view} setView={changeView} isClient={isClientUser} views={primaryViews} canCreateContent={canCreateContent} onNewPost={() => openNewPost()} />
 
       {profile && (
         <PostModal
@@ -1236,6 +1348,7 @@ export function ReveeApp() {
         open={postFormOpen && canCreateContent}
         clients={clients}
         activeClientId={activeClientId}
+        initialDate={newPostDate}
         onClose={() => setPostFormOpen(false)}
         onSave={createPost}
       />
@@ -1405,9 +1518,11 @@ export function ReveeApp() {
     instructions: string;
     status: ContentStatus;
     pipeline_stage: PipelineStage;
+    content_format: ContentFormat;
     scheduled_date: string;
     scheduled_time: string;
     files: File[];
+    cover_file?: File | null;
   }) {
     const contentLimit = getContentLimit(subscription);
     const monthKey = new Date().toISOString().slice(0, 7);
@@ -1427,6 +1542,7 @@ export function ReveeApp() {
         instructions: input.instructions,
         status: input.status,
         pipeline_stage: input.pipeline_stage,
+        content_format: input.content_format,
         scheduled_date: input.scheduled_date,
         scheduled_time: input.scheduled_time,
         feed_order: feedOrder,
@@ -1441,7 +1557,7 @@ export function ReveeApp() {
         throw new Error(error?.message ?? "Não foi possível salvar o conteúdo.");
       }
 
-      const media = await uploadMedia(data.id, input.files);
+      const media = await uploadMedia(data.id, input.files, input.cover_file ?? null);
       let savedMedia = media;
       if (media.length) {
         const { data: mediaRows, error: mediaError } = await supabase.from("post_media").insert(
@@ -1449,6 +1565,7 @@ export function ReveeApp() {
             post_id: data.id,
             media_url: item.media_url,
             media_type: item.media_type,
+            thumbnail_url: item.thumbnail_url ?? null,
             order_index: index
           }))
         ).select();
@@ -1463,7 +1580,7 @@ export function ReveeApp() {
       setPosts((current) => [...current, { ...(data as Omit<Post, "media">), media: savedMedia }]);
     } else {
       const postId = crypto.randomUUID();
-      const media = await uploadMedia(postId, input.files);
+      const media = await uploadMedia(postId, input.files, input.cover_file ?? null);
       const nextPost: Post = {
         id: postId,
         client_id: input.client_id,
@@ -1472,6 +1589,7 @@ export function ReveeApp() {
         instructions: input.instructions,
         status: input.status,
         pipeline_stage: input.pipeline_stage,
+        content_format: input.content_format,
         scheduled_date: input.scheduled_date,
         scheduled_time: input.scheduled_time,
         feed_order: feedOrder,
@@ -1488,38 +1606,47 @@ export function ReveeApp() {
     notify("Conteúdo criado");
   }
 
-  async function uploadMedia(postId: string, files: File[]): Promise<PostMedia[]> {
-    const media: PostMedia[] = [];
-    for (const [index, file] of files.entries()) {
+  async function uploadMedia(postId: string, files: File[], coverFile?: File | null): Promise<PostMedia[]> {
+    const firstVideo = files.find((file) => file.type.startsWith("video"));
+    const generatedCover = !coverFile && firstVideo ? await createVideoThumbnailFile(firstVideo) : null;
+    const videoCover = coverFile ?? generatedCover;
+    const videoCoverUrl = videoCover ? await uploadMediaFile(postId, videoCover) : null;
+    const uploads = await Promise.all(files.map(async (file, index): Promise<PostMedia | null> => {
       const mediaType = file.type.startsWith("video") ? "video" : "image";
       if (file.size > 250 * 1024 * 1024) {
         notify(`${file.name} passa de 250MB`);
-        continue;
+        return null;
       }
 
-      let url = URL.createObjectURL(file);
-      if (supabase) {
-        const safeName = file.name.replace(/[^a-z0-9.]+/gi, "-").toLowerCase();
-        const path = `${postId}/${Date.now()}-${safeName}`;
-        const { error } = await supabase.storage.from("post-media").upload(path, file, {
-          cacheControl: "3600",
-          upsert: true
-        });
-        if (!error) {
-          const { data } = supabase.storage.from("post-media").getPublicUrl(path);
-          url = data.publicUrl;
-        }
-      }
+      const url = await uploadMediaFile(postId, file);
 
-      media.push({
+      return {
         id: crypto.randomUUID(),
         post_id: postId,
         media_url: url,
         media_type: mediaType,
+        thumbnail_url: mediaType === "video" ? videoCoverUrl : null,
         order_index: index
+      };
+    }));
+    return uploads.filter((item): item is PostMedia => Boolean(item));
+  }
+
+  async function uploadMediaFile(postId: string, file: File) {
+    let url = URL.createObjectURL(file);
+    if (supabase) {
+      const safeName = file.name.replace(/[^a-z0-9.]+/gi, "-").toLowerCase();
+      const path = `${postId}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("post-media").upload(path, file, {
+        cacheControl: "3600",
+        upsert: true
       });
+      if (!error) {
+        const { data } = supabase.storage.from("post-media").getPublicUrl(path);
+        url = data.publicUrl;
+      }
     }
-    return media;
+    return url;
   }
 
   async function updatePost(postId: string, patch: Partial<Post>) {
@@ -1570,6 +1697,7 @@ export function ReveeApp() {
             post_id: postId,
             media_url: item.media_url,
             media_type: item.media_type,
+            thumbnail_url: item.thumbnail_url ?? null,
             order_index: index
           }))
         ).select();
@@ -1659,11 +1787,31 @@ export function ReveeApp() {
     }
   }
 
+  function billingDocumentPayload() {
+    if (isCpfOrCnpj(agencyBillingDocument)) return {};
+    const input = window.prompt("Informe o CPF ou CNPJ para o faturamento:") ?? "";
+    if (!isCpfOrCnpj(input)) {
+      notify("Informe um CPF ou CNPJ válido para continuar.");
+      return null;
+    }
+    const formattedDocument = formatCpfCnpj(input);
+    setAgencyBillingDocument(formattedDocument);
+    return { billingDocument: onlyDigits(input) };
+  }
+
+  async function billingPaymentAction(action: "payment_link" | "update_payment") {
+    const billingPayload = billingDocumentPayload();
+    if (!billingPayload) return;
+    await billingAction(action, billingPayload);
+  }
+
   async function changePlan(plan: SubscriptionPlan, billingCycle: BillingCycle) {
+    const billingPayload = billingDocumentPayload();
+    if (!billingPayload) return;
     const planRank: Record<SubscriptionPlan, number> = { start: 0, studio: 1, premium: 2 };
     const downgrade = subscription ? planRank[plan] < planRank[subscription.plan] : false;
     setSubscription((current) => current ? { ...current, plan, billing_cycle: billingCycle, updated_at: new Date().toISOString() } : current);
-    await billingAction("change_plan", { plan, billingCycle, applyNextCycle: downgrade });
+    await billingAction("change_plan", { plan, billingCycle, applyNextCycle: downgrade, ...billingPayload });
   }
 
   async function cancelSubscription(reason: string) {
@@ -2007,6 +2155,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [agencyNameInput, setAgencyNameInput] = useState("");
+  const [billingDocument, setBillingDocument] = useState("");
   const [role, setRole] = useState<"agency" | "member" | "client">("agency");
   const [inviteCode, setInviteCode] = useState("");
   const [message, setMessage] = useState("");
@@ -2158,14 +2307,20 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
         }
 
         // ── Fluxo agência ──
+        if (!isCpfOrCnpj(billingDocument)) {
+          setMessage("Informe um CPF ou CNPJ válido para o faturamento.");
+          return;
+        }
+
         const { error } = await supabase.auth.signUp({
-          email,
+          email: normalizeEmail(email),
           password,
           options: {
             data: {
               name,
               role: "agency",
               agency_name: agencyNameInput || name,
+              billing_document: onlyDigits(billingDocument),
               referral_code: inviteCode.trim() || null
             },
             emailRedirectTo: `${window.location.origin}/auth/callback`
@@ -2243,6 +2398,13 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
           <>
             <Field label="Seu nome" value={name} onChange={setName} placeholder="Seu nome" />
             <Field label="Nome da agência" value={agencyNameInput} onChange={setAgencyNameInput} placeholder="Nome que aparecerá na plataforma" />
+            <Field
+              label="CPF ou CNPJ"
+              value={billingDocument}
+              onChange={(value) => setBillingDocument(formatCpfCnpj(value))}
+              placeholder="Para emissão e pagamento"
+              inputMode="numeric"
+            />
             <Field label="Código de indicação ou convite" value={inviteCode} onChange={setInviteCode} placeholder="Opcional" />
           </>
         )}
@@ -2519,7 +2681,7 @@ function CalendarView({
   stats: { total: number; approved: number; awaiting: number; revision: number };
   isClient: boolean;
   onOpenPost: (post: Post) => void;
-  onNewPost: () => void;
+  onNewPost: (date?: string) => void;
   onMovePost: (postId: string, date: string) => void;
   onStatusFilter: (status: StatusFilter) => void;
 }) {
@@ -2597,7 +2759,7 @@ function CalendarView({
                 posts={posts.filter((post) => post.scheduled_date === cell.iso)}
                 isClient={isClient}
                 onOpenPost={onOpenPost}
-                onNewPost={onNewPost}
+                onNewPost={() => onNewPost(cell.iso)}
               />
             ))}
           </div>
@@ -2632,9 +2794,19 @@ function CalendarCell({
       )}
     >
       <div className="mb-1 flex items-center justify-between">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary group-hover:bg-accent-light sm:h-7 sm:w-7 sm:text-xs">
-          {cell.day}
-        </span>
+        {!isClient ? (
+          <button
+            onClick={onNewPost}
+            className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary hover:bg-accent-light sm:h-7 sm:w-7 sm:text-xs"
+            title="Criar conteúdo nesta data"
+          >
+            {cell.day}
+          </button>
+        ) : (
+          <span className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary sm:h-7 sm:w-7 sm:text-xs">
+            {cell.day}
+          </span>
+        )}
         {!isClient && (
           <button
             onClick={onNewPost}
@@ -2670,6 +2842,7 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
       </span>
       <span className="mt-1 hidden items-center justify-between gap-2 text-[9px] font-semibold uppercase tracking-[0.12em] opacity-75 sm:flex">
         <span>{post.scheduled_time || "--:--"}</span>
+        <span>{getPostTypeLabel(post)}</span>
         {signal && <span>{signal.label}</span>}
       </span>
     </button>
@@ -3648,6 +3821,7 @@ function PostModal({
   const [editTime, setEditTime] = useState("");
   const [editStatus, setEditStatus] = useState<ContentStatus>("draft");
   const [editStage, setEditStage] = useState<PipelineStage>("needs_design");
+  const [editContentFormat, setEditContentFormat] = useState<ContentFormat>("static");
   const [editMedia, setEditMedia] = useState<Array<PostMedia | (PostMedia & { sourceFile: File })>>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [resolvingRevision, setResolvingRevision] = useState(false);
@@ -3670,6 +3844,7 @@ function PostModal({
     setEditTime(post.scheduled_time ?? "");
     setEditStatus(post.status);
     setEditStage(post.pipeline_stage);
+    setEditContentFormat(getPostType(post));
     setEditMedia(post.media.slice().sort((a, b) => a.order_index - b.order_index));
   }, [post]);
   if (!post) return null;
@@ -3788,7 +3963,7 @@ function PostModal({
               <div className="relative aspect-[4/5] bg-accent-light">
                 {current
                   ? current.media_type === "video"
-                    ? <video key={current.id} src={current.media_url} controls className="h-full w-full object-contain" />
+                    ? <video key={current.id} src={current.media_url} poster={current.thumbnail_url ?? undefined} controls preload="auto" playsInline className="h-full w-full object-contain" />
                     : <img key={current.id} src={current.media_url} alt="" className="h-full w-full object-contain" decoding="async" />
                   : <div className="flex h-full items-center justify-center text-muted"><ImagePlus className="h-10 w-10" /></div>}
                 {media.length > 1 && (
@@ -3867,8 +4042,8 @@ function PostModal({
                   <select value={editStatus} onChange={(event) => setEditStatus(event.target.value as ContentStatus)} className="rounded-lg border border-line px-3 py-3 text-sm">
                     {Object.entries(statusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
                   </select>
-                  <select value={editStage} onChange={(event) => setEditStage(event.target.value as PipelineStage)} className="rounded-lg border border-line px-3 py-3 text-sm">
-                    {Object.entries(pipelineMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+                  <select value={editContentFormat} onChange={(event) => setEditContentFormat(event.target.value as ContentFormat)} className="rounded-lg border border-line px-3 py-3 text-sm">
+                    {Object.entries(contentFormatLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
                 <div className="rounded-[14px] border border-line bg-white p-3">
@@ -3897,7 +4072,9 @@ function PostModal({
                       <div key={item.id} className="flex items-center gap-2 rounded-xl border border-line bg-[#fbfbfb] p-2">
                         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-accent-light">
                           {item.media_type === "video"
-                            ? <video src={item.media_url} className="h-full w-full object-cover" muted />
+                            ? item.thumbnail_url
+                              ? <img src={item.thumbnail_url} alt="" className="h-full w-full object-cover" />
+                              : <div className="flex h-full w-full items-center justify-center text-accent-dark"><FileText className="h-5 w-5" /></div>
                             : <img src={item.media_url} alt="" className="h-full w-full object-cover" />}
                         </div>
                         <div className="min-w-0 flex-1">
@@ -3936,7 +4113,8 @@ function PostModal({
                         scheduled_date: editDate,
                         scheduled_time: editTime,
                         status: editStatus,
-                        pipeline_stage: editStage
+                        pipeline_stage: defaultStageForStatus(editStatus),
+                        content_format: editContentFormat
                       }, mediaItemsForSave());
                       setEditing(false);
                     } finally {
@@ -4265,12 +4443,14 @@ function PostFormModal({
   open,
   clients,
   activeClientId,
+  initialDate,
   onClose,
   onSave
 }: {
   open: boolean;
   clients: Client[];
   activeClientId: string;
+  initialDate: string;
   onClose: () => void;
   onSave: (input: any) => Promise<void>;
 }) {
@@ -4278,14 +4458,29 @@ function PostFormModal({
   const [clientId, setClientId] = useState(activeClientId);
   const [caption, setCaption] = useState("");
   const [instructions, setInstructions] = useState("");
-  const [date, setDate] = useState("2026-05-20");
+  const [date, setDate] = useState(initialDate);
   const [time, setTime] = useState("12:00");
   const [status, setStatus] = useState<ContentStatus>("draft");
-  const [stage, setStage] = useState<PipelineStage>("needs_design");
+  const [contentFormat, setContentFormat] = useState<ContentFormat>("static");
   const [files, setFiles] = useState<File[]>([]);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => setClientId(activeClientId), [activeClientId]);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    setTitle("");
+    setClientId(activeClientId);
+    setCaption("");
+    setInstructions("");
+    setDate(initialDate);
+    setTime("12:00");
+    setStatus("draft");
+    setContentFormat("static");
+    setFiles([]);
+    setCoverFile(null);
+    setSaving(false);
+  }, [activeClientId, initialDate, open]);
   if (!open) return null;
   return (
     <ModalFrame title="Novo conteúdo" onClose={onClose}>
@@ -4331,15 +4526,40 @@ function PostFormModal({
           ))}
         </select>
         <select
-          value={stage}
-          onChange={(event) => setStage(event.target.value as PipelineStage)}
+          value={contentFormat}
+          onChange={(event) => setContentFormat(event.target.value as ContentFormat)}
           className="rounded-lg border border-line px-3 py-3 text-sm"
         >
-          {Object.entries(pipelineMeta).map(([value, meta]) => (
-            <option key={value} value={value}>{meta.label}</option>
+          {Object.entries(contentFormatLabels).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
           ))}
         </select>
       </div>
+      {contentFormat === "video" && (
+        <div className="mb-4 rounded-[14px] border border-line bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-primary">Capa do vídeo</div>
+              <div className="mt-1 text-xs text-muted">Essa imagem aparece na prévia e no calendário.</div>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-line px-3 py-2 text-xs font-semibold text-primary hover:bg-accent-light"
+              onClick={() => coverInputRef.current?.click()}
+            >
+              {coverFile ? "Trocar capa" : "Subir capa"}
+            </button>
+          </div>
+          {coverFile && <div className="mt-2 text-xs font-semibold text-accent-dark">{coverFile.name}</div>}
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => setCoverFile(event.target.files?.[0] ?? null)}
+          />
+        </div>
+      )}
       <button
         className="mb-3 flex w-full flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-accent/60 bg-accent-light/40 px-4 py-8 text-sm font-semibold text-accent-dark"
         onClick={() => inputRef.current?.click()}
@@ -4353,7 +4573,7 @@ function PostFormModal({
         accept="image/*,video/*"
         multiple
         className="hidden"
-        onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+            onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
       />
       {!!files.length && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -4370,7 +4590,19 @@ function PostFormModal({
         onClick={async () => {
           setSaving(true);
           try {
-            await onSave({ client_id: clientId, title, caption, instructions, status, pipeline_stage: stage, scheduled_date: date, scheduled_time: time, files });
+            await onSave({
+              client_id: clientId,
+              title,
+              caption,
+              instructions,
+              status,
+              pipeline_stage: defaultStageForStatus(status),
+              content_format: contentFormat,
+              scheduled_date: date,
+              scheduled_time: time,
+              files,
+              cover_file: coverFile
+            });
             onClose();
           } finally {
             setSaving(false);
@@ -4696,6 +4928,7 @@ function SubscriptionBlocked({
 
 function BillingView({
   agencyName,
+  billingDocument,
   subscription,
   history,
   referrals,
@@ -4707,6 +4940,7 @@ function BillingView({
   onUpdatePayment
 }: {
   agencyName: string;
+  billingDocument: string;
   subscription: Subscription | null;
   history: BillingHistory[];
   referrals: Referral[];
@@ -4847,6 +5081,7 @@ function BillingView({
       {manageOpen && (
         <BillingManagementModal
           agencyName={agencyName}
+          billingDocument={billingDocument}
           subscription={subscription}
           history={history}
           onClose={() => setManageOpen(false)}
@@ -4863,6 +5098,7 @@ function BillingView({
 
 function BillingManagementModal({
   agencyName,
+  billingDocument,
   subscription,
   history,
   onClose,
@@ -4873,6 +5109,7 @@ function BillingManagementModal({
   onUpdatePayment
 }: {
   agencyName: string;
+  billingDocument: string;
   subscription: Subscription | null;
   history: BillingHistory[];
   onClose: () => void;
@@ -4973,6 +5210,7 @@ function BillingManagementModal({
           </div>
           <div className="mt-4 space-y-3 text-sm">
             <BillingInfoLine label="Nome" value={agencyName} />
+            <BillingInfoLine label="CPF/CNPJ" value={billingDocument || "Não informado"} />
             <BillingInfoLine label="Status" value={getStatusLabel(status)} />
             <BillingInfoLine label="Ciclo" value={subscription?.billing_cycle === "annual" ? "Anual" : "Mensal"} />
           </div>
@@ -5178,7 +5416,9 @@ function MediaThumb({ post }: { post: Post }) {
     <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-accent-light">
       {media
         ? media.media_type === "video"
-          ? <video src={media.media_url} className="h-full w-full object-cover" muted />
+          ? media.thumbnail_url
+            ? <img src={media.thumbnail_url} alt="" className="h-full w-full object-cover" />
+            : <div className="flex h-full w-full items-center justify-center text-accent-dark"><FileText className="h-4 w-4" /></div>
           : <img src={media.media_url} alt="" className="h-full w-full object-cover" />
         : <div className="flex h-full items-center justify-center text-accent-dark"><FileText className="h-4 w-4" /></div>}
     </div>

@@ -156,6 +156,7 @@ function FeedTile({
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: post.id, disabled: isClient });
   const media = post.media[0];
+  const isVideo = post.content_format === "video" || post.media.some((item) => item.media_type === "video");
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className="premium-card-hover overflow-hidden rounded-[6px] border border-line bg-white sm:rounded-[12px] lg:rounded-[14px]">
       <button
@@ -166,9 +167,16 @@ function FeedTile({
       >
         {media ? (
           media.media_type === "video" ? (
-            <video src={media.media_url} className="h-full w-full object-cover" muted playsInline />
+            media.thumbnail_url ? (
+              <img src={media.thumbnail_url} alt="" className="h-full w-full object-cover transition duration-150 group-hover:scale-[1.015]" loading="lazy" />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-muted">
+                <FileText className="h-7 w-7" />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">Vídeo</span>
+              </div>
+            )
           ) : (
-            <img src={media.media_url} alt="" className="h-full w-full object-cover transition duration-150 group-hover:scale-[1.015]" />
+            <img src={media.media_url} alt="" className="h-full w-full object-cover transition duration-150 group-hover:scale-[1.015]" loading="lazy" decoding="async" />
           )
         ) : (
           <div className="flex h-full items-center justify-center text-3xl text-muted"><FileText /></div>
@@ -183,6 +191,11 @@ function FeedTile({
         {post.media.length > 1 && (
           <span className="absolute left-1 top-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur sm:left-2 sm:top-2 sm:px-2 sm:py-1 sm:text-[10px]">
             {post.media.length} slides
+          </span>
+        )}
+        {isVideo && (
+          <span className="absolute left-1 bottom-1 rounded-full bg-black/45 px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur sm:left-2 sm:bottom-2 sm:px-2 sm:py-1 sm:text-[10px]">
+            Vídeo
           </span>
         )}
       </button>

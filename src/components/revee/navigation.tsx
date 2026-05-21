@@ -24,12 +24,12 @@ import {
 import { ReveeLogo } from "@/components/logo";
 import { cn, initials, toInstagramHandle } from "@/lib/utils";
 import type { Client, Profile } from "@/types/domain";
-import type { ContentStatus } from "@/types/domain";
+import type { ContentFormat, ContentStatus } from "@/types/domain";
 import type { AgencyWorkspace, View, ViewItem } from "./types";
 
 type ProfileAction = "profile" | "settings" | "workspace" | "clients" | "team" | "billing" | "logout";
 type StatusFilter = "all" | ContentStatus;
-type TypeFilter = "all" | "image" | "video" | "carousel";
+type TypeFilter = "all" | ContentFormat;
 
 export type NotificationItem = {
   id: string;
@@ -456,7 +456,7 @@ export function Topbar({
         </FilterSelect>
         <FilterSelect value={typeFilter} onChange={(value) => setTypeFilter(value as TypeFilter)} label="Tipo">
           <option value="all">Todos tipos</option>
-          <option value="image">Imagem</option>
+          <option value="static">Post estático</option>
           <option value="video">Vídeo</option>
           <option value="carousel">Carrossel</option>
         </FilterSelect>
