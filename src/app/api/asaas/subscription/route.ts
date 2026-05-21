@@ -56,6 +56,7 @@ async function ensureAsaasSubscription(input: {
   plan: SubscriptionPlan;
   billingCycle: BillingCycle;
   billingDocument?: string | null;
+  paymentMethod?: string | null;
 }) {
   const activeReferralCount = await getActiveReferralCount(input.agencyId);
   const subscriptionValue = getEstimatedPriceWithReferralDiscount(input.plan, input.billingCycle, activeReferralCount);
@@ -92,6 +93,7 @@ async function ensureAsaasSubscription(input: {
         customer: customerId,
         plan: input.plan,
         cycle: input.billingCycle,
+        paymentMethod: input.paymentMethod ?? "credit_card",
         value: subscriptionValue,
         externalReference: input.agencyId,
         nextDueDate: toDateOnly(trialEndsAt) ?? getTrialDueDate()
@@ -151,6 +153,39 @@ export async function POST(request: Request) {
     const { data: agency } = await supabaseAdmin.from("agencies").select("*").eq("id", agencyId).single();
     const { data: subscription } = await supabaseAdmin.from("subscriptions").select("*").eq("agency_id", agencyId).maybeSingle();
 
+    if (action === "activate_trial") {
+      const plan = (body.plan ?? subscription?.plan ?? "studio") as SubscriptionPlan;
+      const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
+      const trialEndsAt = getTrialEndIso(subscription);
+
+      if (subscription?.status === "exempt") {
+        return NextResponse.json({
+          subscription,
+          message: "Essa conta está liberada manualmente e já tem acesso completo."
+        });
+      }
+
+      const { data: updated } = await supabaseAdmin
+        .from("subscriptions")
+        .upsert({
+          agency_id: agencyId,
+          plan,
+          billing_cycle: billingCycle,
+          status: "trial",
+          trial_ends_at: subscription?.trial_ends_at ?? trialEndsAt,
+          current_period_start: subscription?.current_period_start ?? new Date().toISOString(),
+          current_period_end: subscription?.current_period_end ?? trialEndsAt,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "agency_id" })
+        .select()
+        .single();
+
+      return NextResponse.json({
+        subscription: updated,
+        message: "Teste gratuito ativado. Você já pode começar."
+      });
+    }
+
     if (action === "change_plan") {
       const plan = (body.plan ?? "studio") as SubscriptionPlan;
       const billingCycle = (body.billingCycle ?? "monthly") as BillingCycle;
@@ -185,7 +220,7 @@ export async function POST(request: Request) {
       if (asaasSubscriptionId && !applyNextCycle) {
         await asaasRequest(`/subscriptions/${asaasSubscriptionId}`, {
           method: "PUT",
-          body: asaasSubscriptionPayload({ customer: customerId, plan, cycle: billingCycle, value: subscriptionValue, externalReference: agencyId })
+          body: asaasSubscriptionPayload({ customer: customerId, plan, cycle: billingCycle, paymentMethod: "credit_card", value: subscriptionValue, externalReference: agencyId })
         });
       } else if (!asaasSubscriptionId) {
         const trialEndsAt = getTrialEndIso(subscription);
@@ -195,6 +230,7 @@ export async function POST(request: Request) {
             customer: customerId,
             plan,
             cycle: billingCycle,
+            paymentMethod: "credit_card",
             value: subscriptionValue,
             externalReference: agencyId,
             nextDueDate: toDateOnly(trialEndsAt) ?? getTrialDueDate()
@@ -273,9 +309,9 @@ export async function POST(request: Request) {
       const billingCycle = (body.billingCycle ?? subscription?.billing_cycle ?? "monthly") as BillingCycle;
       const billingDocument = body.billingDocument ? String(body.billingDocument).replace(/\D/g, "") : null;
       if (!subscription?.asaas_customer_id && !billingDocument) {
-        return NextResponse.json({ error: "Informe o CPF ou CNPJ para ativar o teste gratuito." }, { status: 400 });
+        return NextResponse.json({ error: "Informe o CPF ou CNPJ para abrir o pagamento." }, { status: 400 });
       }
-      const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle, billingDocument });
+      const ensured = await ensureAsaasSubscription({ agencyId, agency, subscription, plan, billingCycle, billingDocument, paymentMethod: "credit_card" });
       const payment = await getLatestSubscriptionPayment(ensured.asaasSubscriptionId);
       const invoiceUrl = getPaymentUrl(payment) ?? ensured.initialPaymentUrl;
 

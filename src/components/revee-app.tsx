@@ -405,6 +405,10 @@ function createLocalSubscription(agencyId: string, seed: string): Subscription {
 function hasActivatedBilling(subscription?: Subscription | null) {
   if (!subscription) return false;
   if (subscription.status === "exempt") return true;
+  if (subscription.status === "trial" && subscription.trial_ends_at) {
+    const trialEndsAt = new Date(subscription.trial_ends_at).getTime();
+    return !Number.isNaN(trialEndsAt) && trialEndsAt > Date.now();
+  }
   return Boolean(subscription.asaas_subscription_id);
 }
 
@@ -570,13 +574,11 @@ export function ReveeApp() {
     setProfile(nextProfile);
 
     let agencyDisplayName = nextProfile.name;
-    if (nextProfile.role !== "client" && nextProfile.agency_id) {
-      const { data: agency } = await supabase.from("agencies").select("name").eq("id", nextProfile.agency_id).single();
+    if (nextProfile.agency_id) {
+      const { data: agency } = await supabase.from("agencies").select("name").eq("id", nextProfile.agency_id).maybeSingle();
       agencyDisplayName = agency?.name ?? nextProfile.name;
-      setAgencyName(agencyDisplayName);
-    } else {
-      setAgencyName(nextProfile.name);
     }
+    setAgencyName(agencyDisplayName);
 
     const clientQuery = nextProfile.role !== "client"
       ? supabase.from("clients").select("*").eq("agency_id", nextProfile.agency_id!)
@@ -1007,7 +1009,7 @@ export function ReveeApp() {
       <TrialActivationGate
         agencyName={agencyName}
         subscription={subscription}
-        onActivate={(plan, billingCycle, billingDocument) => billingAction("payment_link", { plan, billingCycle, billingDocument })}
+        onActivate={(plan, billingCycle) => billingAction("activate_trial", { plan, billingCycle })}
         onLogout={handleLogout}
       />
     );
@@ -1861,26 +1863,20 @@ function TrialActivationGate({
 }: {
   agencyName: string;
   subscription: Subscription | null;
-  onActivate: (plan: SubscriptionPlan, cycle: BillingCycle, billingDocument: string) => Promise<any>;
+  onActivate: (plan: SubscriptionPlan, cycle: BillingCycle) => Promise<any>;
   onLogout: () => Promise<void>;
 }) {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>(subscription?.plan ?? "studio");
   const [cycle, setCycle] = useState<BillingCycle>(subscription?.billing_cycle ?? "monthly");
-  const [billingDocument, setBillingDocument] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
   async function activate() {
-    const cleanDocument = billingDocument.replace(/\D/g, "");
-    if (![11, 14].includes(cleanDocument.length)) {
-      setMessage("Informe o CPF ou CNPJ para ativar o teste gratuito.");
-      return;
-    }
     setBusy(true);
     setMessage("");
-    const data = await onActivate(selectedPlan, cycle, cleanDocument);
-    if (!data?.checkoutUrl) {
-      setMessage(data?.message ?? "Estamos preparando sua tela de ativação. Tente novamente em alguns segundos.");
+    const data = await onActivate(selectedPlan, cycle);
+    if (data?.message) {
+      setMessage(data.message);
     }
     setBusy(false);
   }
@@ -1977,16 +1973,6 @@ function TrialActivationGate({
                   </button>
                 );
               })}
-            </div>
-
-            <div className="mt-4">
-              <Field
-                label="CPF ou CNPJ"
-                value={billingDocument}
-                onChange={setBillingDocument}
-                placeholder="Necessário para ativar a cobrança"
-                inputMode="numeric"
-              />
             </div>
 
             {message && <div className="mt-4 rounded-xl bg-accent-light px-4 py-3 text-sm font-medium text-accent-dark">{message}</div>}
