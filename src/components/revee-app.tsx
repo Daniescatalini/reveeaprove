@@ -51,6 +51,8 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Target,
+  Megaphone,
   Trash2,
   Upload,
   UserPlus,
@@ -65,13 +67,43 @@ import type { AgencyWorkspace, View, ViewItem } from "@/components/revee/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { PLANS, formatCurrency, generateReferralCode, getContentLimit, getEstimatedPriceWithReferralDiscount, getLimit, getPastDueDaysLeft, getPlanLabel, getPlanPrice, getReferralDiscountAmount, getStatusLabel, getTrialDaysLeft, shouldSuspendAccess } from "@/lib/plans";
 import { cn, formatDate, initials, toInstagramHandle } from "@/lib/utils";
-import type { BillingCycle, BillingHistory, Client, Comment, ContentFormat, ContentStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
+import type { ActivityHistory, BillingCycle, BillingHistory, Campaign, CampaignMedia, CampaignPlatform, CampaignStatus, Client, Comment, ContentFormat, ContentStatus, MonthlyGoal, MonthlyGoalStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
 
 type AuthMode = "login" | "signup" | "forgot" | "reset" | "confirm";
 type ClientInvite = Pick<Client, "id" | "name" | "avatar" | "agency_id">;
 type MemberInvite = Pick<TeamMember, "id" | "name" | "avatar" | "agency_id" | "role_title">;
 type StatusFilter = "all" | ContentStatus;
 type TypeFilter = "all" | ContentFormat;
+type CampaignFormInput = {
+  client_id: string;
+  title: string;
+  objective: string;
+  platform: CampaignPlatform;
+  audience: string;
+  daily_budget: string;
+  total_budget: string;
+  start_date: string;
+  end_date: string;
+  status: CampaignStatus;
+  responsible_name: string;
+  copy: string;
+  internal_notes: string;
+  client_feedback: string;
+  files: File[];
+};
+
+type MonthlyGoalFormInput = {
+  client_id: string;
+  month: number;
+  year: number;
+  title: string;
+  description: string;
+  planned_actions: string;
+  responsible_name: string;
+  status: MonthlyGoalStatus;
+  client_feedback: string;
+  result_notes: string;
+};
 
 const statusMeta: Record<ContentStatus, { label: string; color: string; bg: string }> = {
   draft: { label: "Rascunho", color: "#6f6a86", bg: "#f7f6fa" },
@@ -103,11 +135,33 @@ const pipelineStyle: Record<PipelineStage, { accent: string; bg: string }> = {
   published: { accent: "#2f7a5c", bg: "#e5f4ee" }
 };
 
+const campaignStatusMeta: Record<CampaignStatus, { label: string; color: string; bg: string }> = {
+  creating: { label: "Em criação", color: "#7b4aa1", bg: "#f2e9f8" },
+  awaiting_approval: { label: "Aguardando aprovação", color: "#7450a8", bg: "#efe8fb" },
+  approved: { label: "Aprovada", color: "#2f7a5c", bg: "#e5f4ee" },
+  active: { label: "Ativa", color: "#2c7058", bg: "#e4f2ed" },
+  paused: { label: "Pausada", color: "#6f6a86", bg: "#f7f6fa" },
+  finished: { label: "Finalizada", color: "#46658e", bg: "#e8eef7" },
+  revision_requested: { label: "Revisão solicitada", color: "#8a4a63", bg: "#f6e7ee" }
+};
+
+const monthlyGoalStatusMeta: Record<MonthlyGoalStatus, { label: string; color: string; bg: string }> = {
+  planned: { label: "Planejado", color: "#7450a8", bg: "#efe8fb" },
+  in_progress: { label: "Em andamento", color: "#46658e", bg: "#e8eef7" },
+  done: { label: "Realizado", color: "#2f7a5c", bg: "#e5f4ee" },
+  paused: { label: "Pausado", color: "#6f6a86", bg: "#f7f6fa" },
+  cancelled: { label: "Cancelado", color: "#8a4a63", bg: "#f6e7ee" }
+};
+
+const campaignPlatforms: CampaignPlatform[] = ["Meta Ads", "Google Ads", "TikTok Ads", "Pinterest Ads", "Outra"];
+
 const views: ViewItem[] = [
   { id: "calendar", label: "Calendário", icon: CalendarDays },
   { id: "pipeline", label: "Fluxo", icon: LayoutDashboard },
   { id: "feed", label: "Prévia", icon: Grid3X3 },
   { id: "contents", label: "Conteúdos", icon: FileText },
+  { id: "campaigns", label: "Campanhas", icon: Megaphone },
+  { id: "goals", label: "Objetivos", icon: Target },
   { id: "clients", label: "Clientes", icon: Users, agencyOnly: true },
   { id: "team", label: "Equipe", icon: UserPlus, agencyOnly: true }
 ];
@@ -216,6 +270,74 @@ const seedPosts: Post[] = [
   }
 ];
 
+const seedCampaigns: Campaign[] = [
+  {
+    id: "campaign-local-1",
+    agency_id: "agency-local",
+    client_id: "client-a",
+    title: "Captação showroom maio",
+    objective: "Gerar conversas qualificadas para visita ao showroom.",
+    platform: "Meta Ads",
+    audience: "Mulheres de 28 a 48 anos, interessadas em decoração autoral e arquitetura.",
+    daily_budget: 80,
+    total_budget: 1200,
+    start_date: "2026-05-14",
+    end_date: "2026-05-30",
+    status: "awaiting_approval",
+    responsible_user_id: null,
+    responsible_name: "Dani",
+    copy: "Sua casa pode ter uma presença mais autoral sem perder acolhimento. Conheça a curadoria Casa Aurora.",
+    internal_notes: "Validar criativo principal antes de ativar.",
+    client_feedback: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    media: [
+      {
+        id: "campaign-media-local-1",
+        campaign_id: "campaign-local-1",
+        url: "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?auto=format&fit=crop&w=900&q=80",
+        type: "image",
+        order_index: 0,
+        created_at: new Date().toISOString()
+      }
+    ]
+  }
+];
+
+const seedMonthlyGoals: MonthlyGoal[] = [
+  {
+    id: "goal-local-1",
+    agency_id: "agency-local",
+    client_id: "client-a",
+    month: 5,
+    year: 2026,
+    title: "Fortalecer percepção premium",
+    description: "Construir presença mais autoral e sofisticada para o lançamento da nova coleção.",
+    planned_actions: "Sequência de reels de bastidores\nCarrossel manifesto\nCampanha de captação para showroom",
+    responsible_user_id: null,
+    responsible_name: "Dani",
+    status: "in_progress",
+    client_feedback: null,
+    result_notes: "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+];
+
+const seedActivityHistory: ActivityHistory[] = [
+  {
+    id: "history-local-1",
+    agency_id: "agency-local",
+    client_id: "client-a",
+    item_type: "campaign",
+    item_id: "campaign-local-1",
+    action: "created",
+    user_id: "local-user",
+    description: "Campanha criada pela agência.",
+    created_at: new Date().toISOString()
+  }
+];
+
 const seedTeamMembers: TeamMember[] = [
   {
     id: "member-local-1",
@@ -285,6 +407,21 @@ const defaultWorkspace: AgencyWorkspace = {
   links: "",
   references: ""
 };
+
+function workspaceFromSettings(settings: unknown, agencyName: string): AgencyWorkspace {
+  const saved = settings && typeof settings === "object" ? settings as Partial<AgencyWorkspace> : {};
+  const savedName = typeof saved.name === "string" ? saved.name.trim() : "";
+  const resolvedName = savedName || agencyName || defaultWorkspace.name;
+  const savedBanner = typeof saved.banner === "string" && !saved.banner.startsWith("blob:") ? saved.banner : "";
+  const savedAvatar = typeof saved.avatar === "string" && !saved.avatar.startsWith("blob:") ? saved.avatar : "";
+  return {
+    ...defaultWorkspace,
+    ...saved,
+    name: resolvedName,
+    banner: savedBanner || defaultWorkspace.banner,
+    avatar: savedAvatar
+  };
+}
 
 // ─── Gera código de convite no formato ABC-XXXXXXXXXXXX ──────────────────────
 function generateInviteCode(name: string) {
@@ -360,6 +497,47 @@ function getPostTypeLabel(post: Post) {
   return contentFormatLabels[type];
 }
 
+function getPostFormatBadge(post: Post) {
+  const type = getPostType(post);
+  if (type === "carousel") return {
+    label: "Carrossel",
+    detail: post.media.length > 1 ? `${post.media.length} slides` : "Slides"
+  };
+  if (type === "video") return { label: "Vídeo", detail: "Play" };
+  return { label: "Post", detail: "Estático" };
+}
+
+function campaignStage(status: CampaignStatus): PipelineStage {
+  if (status === "creating") return "needs_design";
+  if (status === "awaiting_approval") return "waiting_client";
+  if (status === "revision_requested") return "revision";
+  if (status === "approved" || status === "paused") return "approved";
+  return "published";
+}
+
+function campaignMonthMatches(campaign: Campaign, month: string) {
+  if (month === "all") return true;
+  const starts = campaign.start_date?.startsWith(month);
+  const ends = campaign.end_date?.startsWith(month);
+  if (starts || ends) return true;
+  if (!campaign.start_date || !campaign.end_date) return false;
+  const monthStart = new Date(`${month}-01T00:00:00`);
+  const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
+  const start = new Date(`${campaign.start_date}T00:00:00`);
+  const end = new Date(`${campaign.end_date}T23:59:59`);
+  return start <= monthEnd && end >= monthStart;
+}
+
+function goalMonthKey(goal: MonthlyGoal) {
+  return `${goal.year}-${String(goal.month).padStart(2, "0")}`;
+}
+
+function getCampaignPeriod(campaign: Campaign) {
+  const start = formatDate(campaign.start_date);
+  if (!campaign.end_date) return start;
+  return `${start} ate ${formatDate(campaign.end_date)}`;
+}
+
 function defaultStageForStatus(status: ContentStatus): PipelineStage {
   if (status === "awaiting_approval") return "waiting_client";
   if (status === "revision_requested") return "revision";
@@ -371,6 +549,32 @@ function defaultStageForStatus(status: ContentStatus): PipelineStage {
 function getMediaPreviewUrl(media?: PostMedia | null) {
   if (!media) return "";
   return media.media_type === "video" ? media.thumbnail_url || media.media_url : media.media_url;
+}
+
+function getUploadContentType(file: File) {
+  const name = file.name.toLowerCase();
+  if (file.type) return file.type;
+  if (name.endsWith(".mp4") || name.endsWith(".m4v")) return "video/mp4";
+  if (name.endsWith(".webm")) return "video/webm";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  if (name.endsWith(".png")) return "image/png";
+  return "application/octet-stream";
+}
+
+function isBrowserPlayableVideoFile(file: File) {
+  if (!file.type.startsWith("video")) return true;
+  if (typeof document === "undefined") return true;
+  const type = getUploadContentType(file);
+  const video = document.createElement("video");
+  if (video.canPlayType(type)) return true;
+  return /\.(mp4|m4v|webm)$/i.test(file.name);
+}
+
+function warnUnsupportedVideos(files: File[]) {
+  const unsupported = files.filter((file) => file.type.startsWith("video") && !isBrowserPlayableVideoFile(file));
+  if (!unsupported.length) return false;
+  window.alert(`Este vídeo não toca direto no navegador: ${unsupported.map((file) => file.name).join(", ")}. Exporte/envie em MP4 para reproduzir no computador.`);
+  return true;
 }
 
 async function createVideoThumbnailFile(file: File) {
@@ -509,6 +713,9 @@ export function ReveeApp() {
   const [clients, setClients] = useState<Client[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [monthlyGoals, setMonthlyGoals] = useState<MonthlyGoal[]>([]);
+  const [activityHistory, setActivityHistory] = useState<ActivityHistory[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [billingHistory, setBillingHistory] = useState<BillingHistory[]>([]);
@@ -519,8 +726,14 @@ export function ReveeApp() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [toast, setToast] = useState("");
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [selectedGoal, setSelectedGoal] = useState<MonthlyGoal | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [postFormOpen, setPostFormOpen] = useState(false);
+  const [campaignFormOpen, setCampaignFormOpen] = useState(false);
+  const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const [campaignToEdit, setCampaignToEdit] = useState<Campaign | null>(null);
+  const [goalToEdit, setGoalToEdit] = useState<MonthlyGoal | null>(null);
   const [newPostDate, setNewPostDate] = useState(new Date().toISOString().slice(0, 10));
   const [clientFormOpen, setClientFormOpen] = useState(false);
   const [memberFormOpen, setMemberFormOpen] = useState(false);
@@ -531,7 +744,7 @@ export function ReveeApp() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
-  const [monthFilter, setMonthFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0, 7));
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
@@ -667,16 +880,22 @@ export function ReveeApp() {
 
     let agencyDisplayName = nextProfile.name;
     if (nextProfile.agency_id) {
-      const { data: agency } = await supabase.from("agencies").select("name,billing_document").eq("id", nextProfile.agency_id).maybeSingle();
+      const { data: agency } = await supabase.from("agencies").select("name,billing_document,workspace_settings").eq("id", nextProfile.agency_id).maybeSingle();
       agencyDisplayName = agency?.name ?? nextProfile.name;
       setAgencyBillingDocument(agency?.billing_document ? formatCpfCnpj(agency.billing_document) : "");
-      try {
-        const savedWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
-        setWorkspace(savedWorkspace
-          ? { ...defaultWorkspace, ...JSON.parse(savedWorkspace), name: agencyDisplayName }
-          : { ...defaultWorkspace, name: agencyDisplayName });
-      } catch {
-        setWorkspace({ ...defaultWorkspace, name: agencyDisplayName });
+      let nextWorkspace = workspaceFromSettings(agency?.workspace_settings, agencyDisplayName);
+      if (!agency?.workspace_settings) {
+        try {
+          const localWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
+          if (localWorkspace) nextWorkspace = workspaceFromSettings(JSON.parse(localWorkspace), agencyDisplayName);
+        } catch {
+          nextWorkspace = workspaceFromSettings(null, agencyDisplayName);
+        }
+      }
+      setWorkspace(nextWorkspace);
+      agencyDisplayName = nextWorkspace.name;
+      if (!agency?.workspace_settings && nextWorkspace !== defaultWorkspace) {
+        void supabase.from("agencies").update({ workspace_settings: nextWorkspace }).eq("id", nextProfile.agency_id);
       }
     }
     setAgencyName(agencyDisplayName);
@@ -716,9 +935,40 @@ export function ReveeApp() {
           created_at: comment.created_at
         }))
       );
+
+      const { data: campaignRows } = await supabase
+        .from("campaigns")
+        .select("*, campaign_media(*)")
+        .in("client_id", clientIds)
+        .order("start_date", { ascending: true });
+      setCampaigns(
+        (campaignRows ?? []).map((campaign: any) => ({
+          ...campaign,
+          media: (campaign.campaign_media ?? []).sort((a: CampaignMedia, b: CampaignMedia) => a.order_index - b.order_index)
+        })) as Campaign[]
+      );
+
+      const { data: goalRows } = await supabase
+        .from("monthly_goals")
+        .select("*")
+        .in("client_id", clientIds)
+        .order("year", { ascending: false })
+        .order("month", { ascending: false });
+      setMonthlyGoals((goalRows ?? []) as MonthlyGoal[]);
+
+      const { data: historyRows } = await supabase
+        .from("activity_history")
+        .select("*")
+        .in("client_id", clientIds)
+        .order("created_at", { ascending: false })
+        .limit(120);
+      setActivityHistory((historyRows ?? []) as ActivityHistory[]);
     } else {
       setPosts([]);
       setComments([]);
+      setCampaigns([]);
+      setMonthlyGoals([]);
+      setActivityHistory([]);
     }
 
     if (nextProfile.role !== "client" && nextProfile.agency_id) {
@@ -819,6 +1069,20 @@ export function ReveeApp() {
   }
 
   function openNotification(item: NotificationItem) {
+    if (item.campaignId) {
+      const target = campaigns.find((campaign) => campaign.id === item.campaignId);
+      if (!target) return;
+      setActiveClientId(target.client_id);
+      setSelectedCampaign(target);
+      return;
+    }
+    if (item.goalId) {
+      const target = monthlyGoals.find((goal) => goal.id === item.goalId);
+      if (!target) return;
+      setActiveClientId(target.client_id);
+      setSelectedGoal(target);
+      return;
+    }
     if (!item.postId) return;
     const target = posts.find((post) => post.id === item.postId);
     if (!target) return;
@@ -850,22 +1114,53 @@ export function ReveeApp() {
     return filtered;
   }, [activeClient?.id, clients, comments, monthFilter, posts, query, statusFilter, typeFilter]);
 
+  const scopedCampaigns = useMemo(() => {
+    const clientById = new Map(clients.map((client) => [client.id, client.name]));
+    return campaigns
+      .filter((campaign) => campaign.client_id === activeClient?.id)
+      .filter((campaign) => {
+        const haystack = `${campaign.title} ${campaign.objective ?? ""} ${campaign.platform} ${campaign.audience ?? ""} ${campaign.copy ?? ""} ${campaignStatusMeta[campaign.status]?.label ?? campaign.status} ${clientById.get(campaign.client_id) ?? ""}`.toLowerCase();
+        const matchesQuery = !query.trim() || haystack.includes(query.toLowerCase());
+        return matchesQuery && campaignMonthMatches(campaign, monthFilter);
+      })
+      .sort((a, b) => a.start_date.localeCompare(b.start_date));
+  }, [activeClient?.id, campaigns, clients, monthFilter, query]);
+
+  const scopedGoals = useMemo(() => {
+    return monthlyGoals
+      .filter((goal) => goal.client_id === activeClient?.id)
+      .filter((goal) => {
+        const haystack = `${goal.title} ${goal.description ?? ""} ${goal.planned_actions ?? ""} ${monthlyGoalStatusMeta[goal.status].label}`.toLowerCase();
+        const matchesQuery = !query.trim() || haystack.includes(query.toLowerCase());
+        const matchesMonth = monthFilter === "all" || goalMonthKey(goal) === monthFilter;
+        return matchesQuery && matchesMonth;
+      })
+      .sort((a, b) => goalMonthKey(b).localeCompare(goalMonthKey(a)));
+  }, [activeClient?.id, monthFilter, monthlyGoals, query]);
+
   const availableMonths = useMemo(() => {
-    const months = new Set(
-      posts
-        .filter((post) => post.client_id === activeClient?.id)
-        .map((post) => post.scheduled_date.slice(0, 7))
-    );
+    const months = new Set<string>();
+    posts.filter((post) => post.client_id === activeClient?.id).forEach((post) => months.add(post.scheduled_date.slice(0, 7)));
+    campaigns.filter((campaign) => campaign.client_id === activeClient?.id).forEach((campaign) => {
+      if (campaign.start_date) months.add(campaign.start_date.slice(0, 7));
+      if (campaign.end_date) months.add(campaign.end_date.slice(0, 7));
+    });
+    monthlyGoals.filter((goal) => goal.client_id === activeClient?.id).forEach((goal) => months.add(goalMonthKey(goal)));
+    months.add(new Date().toISOString().slice(0, 7));
     return Array.from(months).sort();
-  }, [activeClient?.id, posts]);
+  }, [activeClient?.id, campaigns, monthlyGoals, posts]);
 
   const stats = useMemo(() => {
     const total = scopedPosts.length;
     const approved = scopedPosts.filter((post) => post.status === "approved").length;
     const awaiting = scopedPosts.filter((post) => post.status === "awaiting_approval").length;
     const revision = scopedPosts.filter((post) => post.status === "revision_requested").length;
-    return { total, approved, awaiting, revision };
-  }, [scopedPosts]);
+    const activeCampaigns = scopedCampaigns.filter((campaign) => campaign.status === "active").length;
+    const campaignAwaiting = scopedCampaigns.filter((campaign) => campaign.status === "awaiting_approval").length;
+    const campaignRevision = scopedCampaigns.filter((campaign) => campaign.status === "revision_requested").length;
+    const campaignFinished = scopedCampaigns.filter((campaign) => campaign.status === "finished").length;
+    return { total, approved, awaiting, revision, activeCampaigns, campaignAwaiting, campaignRevision, campaignFinished };
+  }, [scopedCampaigns, scopedPosts]);
 
   const allNotifications = useMemo<NotificationItem[]>(() => {
     const byClient = new Map(clients.map((client) => [client.id, client.name]));
@@ -985,10 +1280,82 @@ export function ReveeApp() {
       }
     });
 
-    return [...billingNotices, ...commentNotices, ...postNotices]
+    const campaignNotices: NotificationItem[] = campaigns.flatMap((campaign) => {
+      const clientName = byClient.get(campaign.client_id) ?? "Cliente";
+      const updatedAt = campaign.updated_at ?? campaign.created_at;
+      if (campaign.status === "awaiting_approval" && isClientUser) {
+        return [{
+          id: `campaign-awaiting-${campaign.id}`,
+          title: `${agencyName} enviou uma campanha para aprovação`,
+          detail: campaign.title,
+          time: formatTimelineDate(updatedAt),
+          campaignId: campaign.id,
+          createdAt: updatedAt
+        }];
+      }
+      if (campaign.status === "approved" && !isClientUser) {
+        return [{
+          id: `campaign-approved-${campaign.id}`,
+          title: `${clientName} aprovou a campanha`,
+          detail: campaign.title,
+          time: formatTimelineDate(updatedAt),
+          campaignId: campaign.id,
+          createdAt: updatedAt
+        }];
+      }
+      if (campaign.status === "revision_requested" && !isClientUser) {
+        return [{
+          id: `campaign-revision-${campaign.id}`,
+          title: `${clientName} solicitou revisão na campanha`,
+          detail: campaign.client_feedback || campaign.title,
+          time: formatTimelineDate(updatedAt),
+          campaignId: campaign.id,
+          createdAt: updatedAt
+        }];
+      }
+      if (campaign.status === "active") {
+        return [{
+          id: `campaign-active-${campaign.id}`,
+          title: "Campanha marcada como ativa",
+          detail: campaign.title,
+          time: formatTimelineDate(updatedAt),
+          campaignId: campaign.id,
+          createdAt: updatedAt
+        }];
+      }
+      return [];
+    });
+
+    const goalNotices: NotificationItem[] = monthlyGoals.flatMap((goal) => {
+      const clientName = byClient.get(goal.client_id) ?? "Cliente";
+      const updatedAt = goal.updated_at ?? goal.created_at;
+      if (isClientUser && goal.status === "planned") {
+        return [{
+          id: `goal-planned-${goal.id}`,
+          title: `${agencyName} adicionou objetivos para o mês`,
+          detail: goal.title,
+          time: formatTimelineDate(updatedAt),
+          goalId: goal.id,
+          createdAt: updatedAt
+        }];
+      }
+      if (!isClientUser && goal.client_feedback) {
+        return [{
+          id: `goal-feedback-${goal.id}`,
+          title: `${clientName} deixou feedback nos objetivos do mês`,
+          detail: goal.client_feedback,
+          time: formatTimelineDate(updatedAt),
+          goalId: goal.id,
+          createdAt: updatedAt
+        }];
+      }
+      return [];
+    });
+
+    return [...billingNotices, ...goalNotices, ...campaignNotices, ...commentNotices, ...postNotices]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 16);
-  }, [agencyName, billingHistory, clients, comments, isAgencyUser, isClientUser, posts, profile?.id, profile?.name, referrals, subscription]);
+  }, [agencyName, billingHistory, campaigns, clients, comments, isAgencyUser, isClientUser, monthlyGoals, posts, profile?.id, profile?.name, referrals, subscription]);
 
   const notifications = useMemo(
     () => allNotifications.filter((item) => !dismissedNotificationIds.includes(item.id)),
@@ -1011,7 +1378,10 @@ export function ReveeApp() {
     if (agencyScopedWorkspace.name !== agencyName) setAgencyName(agencyScopedWorkspace.name);
     if (profile?.agency_id) {
       window.localStorage.setItem(`revee-workspace-${profile.agency_id}`, JSON.stringify(agencyScopedWorkspace));
-      supabase?.from("agencies").update({ name: agencyScopedWorkspace.name }).eq("id", profile.agency_id).then(({ error }) => {
+      supabase?.from("agencies").update({
+        name: agencyScopedWorkspace.name,
+        workspace_settings: agencyScopedWorkspace
+      }).eq("id", profile.agency_id).then(({ error }) => {
         if (error) notify(error.message);
       });
     }
@@ -1062,6 +1432,9 @@ export function ReveeApp() {
     setClients([]);
     setPosts([]);
     setComments([]);
+    setCampaigns([]);
+    setMonthlyGoals([]);
+    setActivityHistory([]);
     setTeamMembers([]);
     setAgencyName("Revee Studio");
     setWorkspace(defaultWorkspace);
@@ -1088,6 +1461,9 @@ export function ReveeApp() {
           });
           setClients(seedClients);
           setPosts(seedPosts);
+          setCampaigns(seedCampaigns);
+          setMonthlyGoals(seedMonthlyGoals);
+          setActivityHistory(seedActivityHistory);
           setTeamMembers(seedTeamMembers);
           setSubscription(createLocalSubscription("agency-local", "Revee Studio"));
           setBillingHistory([
@@ -1235,16 +1611,19 @@ export function ReveeApp() {
                   {view === "calendar" && (
                     <CalendarView
                       posts={scopedPosts}
+                      campaigns={scopedCampaigns}
                       stats={stats}
+                      monthFilter={monthFilter}
                       isClient={isClientUser}
                       onOpenPost={setSelectedPost}
+                      onOpenCampaign={setSelectedCampaign}
                       onNewPost={(date) => canCreateContent && openNewPost(date)}
                       onMovePost={async (postId, date) => updatePost(postId, { scheduled_date: date })}
                       onStatusFilter={setStatusFilter}
                     />
                   )}
                   {view === "pipeline" && (
-                    <PipelineView posts={scopedPosts} isClient={isClientUser} onOpenPost={setSelectedPost} onMove={movePipeline} />
+                    <PipelineView posts={scopedPosts} campaigns={scopedCampaigns} isClient={isClientUser} onOpenPost={setSelectedPost} onOpenCampaign={setSelectedCampaign} onMove={movePipeline} />
                   )}
                   {view === "feed" && (
                     <FeedView
@@ -1267,6 +1646,39 @@ export function ReveeApp() {
                   )}
                   {view === "contents" && (
                     <ContentsView posts={scopedPosts} onOpenPost={setSelectedPost} onDelete={confirmDeletePost} canDelete={isAgencyUser} />
+                  )}
+                  {view === "campaigns" && (
+                    <CampaignsView
+                      campaigns={scopedCampaigns}
+                      clients={clients}
+                      canEdit={canCreateContent}
+                      onOpen={setSelectedCampaign}
+                      onNew={() => {
+                        setCampaignToEdit(null);
+                        setCampaignFormOpen(true);
+                      }}
+                      onEdit={(campaign) => {
+                        setCampaignToEdit(campaign);
+                        setCampaignFormOpen(true);
+                      }}
+                    />
+                  )}
+                  {view === "goals" && (
+                    <MonthlyGoalsView
+                      goals={scopedGoals}
+                      clients={clients}
+                      monthFilter={monthFilter}
+                      canEdit={canCreateContent}
+                      onOpen={setSelectedGoal}
+                      onNew={() => {
+                        setGoalToEdit(null);
+                        setGoalFormOpen(true);
+                      }}
+                      onEdit={(goal) => {
+                        setGoalToEdit(goal);
+                        setGoalFormOpen(true);
+                      }}
+                    />
                   )}
                   {view === "clients" && isAgencyUser && (
                     <ClientsView
@@ -1358,6 +1770,62 @@ export function ReveeApp() {
         onSave={createPost}
       />
 
+      <CampaignFormModal
+        open={campaignFormOpen && canCreateContent}
+        clients={clients}
+        activeClientId={activeClientId}
+        campaign={campaignToEdit}
+        onClose={() => {
+          setCampaignFormOpen(false);
+          setCampaignToEdit(null);
+        }}
+        onSave={saveCampaign}
+      />
+
+      <MonthlyGoalFormModal
+        open={goalFormOpen && canCreateContent}
+        clients={clients}
+        activeClientId={activeClientId}
+        goal={goalToEdit}
+        monthFilter={monthFilter}
+        onClose={() => {
+          setGoalFormOpen(false);
+          setGoalToEdit(null);
+        }}
+        onSave={saveMonthlyGoal}
+      />
+
+      <CampaignModal
+        campaign={selectedCampaign}
+        client={clients.find((client) => client.id === selectedCampaign?.client_id) ?? null}
+        history={activityHistory.filter((item) => item.item_type === "campaign" && item.item_id === selectedCampaign?.id)}
+        isClient={isClientUser}
+        canEdit={canCreateContent}
+        onClose={() => setSelectedCampaign(null)}
+        onEdit={(campaign) => {
+          setSelectedCampaign(null);
+          setCampaignToEdit(campaign);
+          setCampaignFormOpen(true);
+        }}
+        onApprove={(campaign) => updateCampaignStatus(campaign, "approved")}
+        onRevision={(campaign, feedback) => updateCampaignStatus(campaign, "revision_requested", feedback)}
+      />
+
+      <MonthlyGoalModal
+        goal={selectedGoal}
+        client={clients.find((client) => client.id === selectedGoal?.client_id) ?? null}
+        history={activityHistory.filter((item) => item.item_type === "monthly_goal" && item.item_id === selectedGoal?.id)}
+        isClient={isClientUser}
+        canEdit={canCreateContent}
+        onClose={() => setSelectedGoal(null)}
+        onEdit={(goal) => {
+          setSelectedGoal(null);
+          setGoalToEdit(goal);
+          setGoalFormOpen(true);
+        }}
+        onFeedback={saveGoalFeedback}
+      />
+
       <ClientFormModal
         open={clientFormOpen && isAgencyUser}
         onClose={() => setClientFormOpen(false)}
@@ -1441,6 +1909,194 @@ export function ReveeApp() {
 
   // ─── Client CRUD ────────────────────────────────────────────────────────────
 
+  async function recordActivity(input: Omit<ActivityHistory, "id" | "created_at" | "agency_id" | "user_id">) {
+    const now = new Date().toISOString();
+    const item: ActivityHistory = {
+      id: crypto.randomUUID(),
+      agency_id: profile?.agency_id ?? "agency-local",
+      user_id: profile?.id ?? null,
+      created_at: now,
+      ...input
+    };
+    setActivityHistory((current) => [item, ...current]);
+    if (supabase && profile?.agency_id) {
+      await supabase.from("activity_history").insert({
+        agency_id: profile.agency_id,
+        client_id: input.client_id,
+        item_type: input.item_type,
+        item_id: input.item_id,
+        action: input.action,
+        user_id: profile.id,
+        description: input.description,
+        created_at: now
+      });
+    }
+  }
+
+  async function uploadCampaignMedia(campaignId: string, files: File[]): Promise<CampaignMedia[]> {
+    const uploads = await Promise.all(files.map(async (file, index): Promise<CampaignMedia | null> => {
+      if (file.size > 250 * 1024 * 1024) {
+        notify(`${file.name} passa de 250MB`);
+        return null;
+      }
+      const url = await uploadMediaFile(`campaigns/${campaignId}`, file);
+      return {
+        id: crypto.randomUUID(),
+        campaign_id: campaignId,
+        url,
+        type: file.type.startsWith("video") ? "video" : "image",
+        order_index: index,
+        created_at: new Date().toISOString()
+      };
+    }));
+    return uploads.filter((item): item is CampaignMedia => Boolean(item));
+  }
+
+  async function saveCampaign(input: CampaignFormInput) {
+    const now = new Date().toISOString();
+    const values = {
+      agency_id: profile?.agency_id ?? "agency-local",
+      client_id: input.client_id,
+      title: input.title,
+      objective: input.objective,
+      platform: input.platform,
+      audience: input.audience,
+      daily_budget: input.daily_budget ? Number(input.daily_budget) : null,
+      total_budget: input.total_budget ? Number(input.total_budget) : null,
+      start_date: input.start_date,
+      end_date: input.end_date || null,
+      status: input.status,
+      responsible_user_id: profile?.id ?? null,
+      responsible_name: input.responsible_name,
+      copy: input.copy,
+      internal_notes: input.internal_notes,
+      client_feedback: input.client_feedback,
+      updated_at: now
+    };
+
+    if (campaignToEdit) {
+      if (supabase) {
+        const { error } = await supabase.from("campaigns").update(values).eq("id", campaignToEdit.id);
+        if (error) throw new Error(error.message);
+      }
+      const uploaded = input.files.length ? await uploadCampaignMedia(campaignToEdit.id, input.files) : [];
+      if (uploaded.length && supabase) {
+        await supabase.from("campaign_media").insert(uploaded.map((item, index) => ({
+          campaign_id: campaignToEdit.id,
+          url: item.url,
+          type: item.type,
+          order_index: campaignToEdit.media.length + index
+        })));
+      }
+      const nextCampaign = { ...campaignToEdit, ...values, media: [...campaignToEdit.media, ...uploaded] };
+      setCampaigns((current) => current.map((campaign) => campaign.id === campaignToEdit.id ? nextCampaign : campaign));
+      setSelectedCampaign(nextCampaign);
+      await recordActivity({ client_id: input.client_id, item_type: "campaign", item_id: campaignToEdit.id, action: "updated", description: "Campanha atualizada." });
+    } else {
+      const localId = crypto.randomUUID();
+      let campaignId = localId;
+      let inserted: Omit<Campaign, "media"> | null = null;
+      if (supabase) {
+        const { data, error } = await supabase.from("campaigns").insert({ ...values, created_at: now }).select().single();
+        if (error || !data) throw new Error(error?.message ?? "Nao foi possivel salvar a campanha.");
+        inserted = data as Omit<Campaign, "media">;
+        campaignId = data.id;
+      }
+      const media = await uploadCampaignMedia(campaignId, input.files);
+      if (media.length && supabase) {
+        await supabase.from("campaign_media").insert(media.map((item, index) => ({
+          campaign_id: campaignId,
+          url: item.url,
+          type: item.type,
+          order_index: index
+        })));
+      }
+      const nextCampaign: Campaign = inserted ? { ...inserted, media } : { id: campaignId, created_at: now, ...values, media };
+      setCampaigns((current) => [...current, nextCampaign]);
+      await recordActivity({ client_id: input.client_id, item_type: "campaign", item_id: campaignId, action: "created", description: "Campanha criada." });
+    }
+    setCampaignFormOpen(false);
+    setCampaignToEdit(null);
+    notify("Campanha salva");
+  }
+
+  async function updateCampaignStatus(campaign: Campaign, status: CampaignStatus, feedback?: string) {
+    const now = new Date().toISOString();
+    const patch: Partial<Campaign> = { status, updated_at: now, ...(feedback ? { client_feedback: feedback } : {}) };
+    if (supabase) {
+      const { error } = await supabase.from("campaigns").update(patch).eq("id", campaign.id);
+      if (error) throw new Error(error.message);
+    }
+    const nextCampaign = { ...campaign, ...patch };
+    setCampaigns((current) => current.map((item) => item.id === campaign.id ? nextCampaign : item));
+    setSelectedCampaign(nextCampaign);
+    await recordActivity({
+      client_id: campaign.client_id,
+      item_type: "campaign",
+      item_id: campaign.id,
+      action: status,
+      description: status === "revision_requested" ? `Revisao solicitada: ${feedback}` : `Status alterado para ${campaignStatusMeta[status].label}.`
+    });
+    notify(status === "revision_requested" ? "Revisao enviada" : "Campanha atualizada");
+  }
+
+  async function saveMonthlyGoal(input: MonthlyGoalFormInput) {
+    const now = new Date().toISOString();
+    const values = {
+      agency_id: profile?.agency_id ?? "agency-local",
+      client_id: input.client_id,
+      month: input.month,
+      year: input.year,
+      title: input.title,
+      description: input.description,
+      planned_actions: input.planned_actions,
+      responsible_user_id: profile?.id ?? null,
+      responsible_name: input.responsible_name,
+      status: input.status,
+      client_feedback: input.client_feedback,
+      result_notes: input.result_notes,
+      updated_at: now
+    };
+
+    if (goalToEdit) {
+      if (supabase) {
+        const { error } = await supabase.from("monthly_goals").update(values).eq("id", goalToEdit.id);
+        if (error) throw new Error(error.message);
+      }
+      const nextGoal = { ...goalToEdit, ...values };
+      setMonthlyGoals((current) => current.map((goal) => goal.id === goalToEdit.id ? nextGoal : goal));
+      setSelectedGoal(nextGoal);
+      await recordActivity({ client_id: input.client_id, item_type: "monthly_goal", item_id: goalToEdit.id, action: "updated", description: "Objetivo do mes atualizado." });
+    } else {
+      const localId = crypto.randomUUID();
+      let savedGoal: MonthlyGoal = { id: localId, created_at: now, ...values };
+      if (supabase) {
+        const { data, error } = await supabase.from("monthly_goals").insert({ ...values, created_at: now }).select().single();
+        if (error || !data) throw new Error(error?.message ?? "Nao foi possivel salvar o objetivo.");
+        savedGoal = data as MonthlyGoal;
+      }
+      setMonthlyGoals((current) => [...current, savedGoal]);
+      await recordActivity({ client_id: input.client_id, item_type: "monthly_goal", item_id: savedGoal.id, action: "created", description: "Objetivo do mes criado." });
+    }
+    setGoalFormOpen(false);
+    setGoalToEdit(null);
+    notify("Objetivo salvo");
+  }
+
+  async function saveGoalFeedback(goal: MonthlyGoal, feedback: string) {
+    const now = new Date().toISOString();
+    const patch = { client_feedback: feedback, updated_at: now };
+    if (supabase) {
+      const { error } = await supabase.from("monthly_goals").update(patch).eq("id", goal.id);
+      if (error) throw new Error(error.message);
+    }
+    const nextGoal = { ...goal, ...patch };
+    setMonthlyGoals((current) => current.map((item) => item.id === goal.id ? nextGoal : item));
+    setSelectedGoal(nextGoal);
+    await recordActivity({ client_id: goal.client_id, item_type: "monthly_goal", item_id: goal.id, action: "feedback", description: "Cliente deixou feedback nos objetivos do mes." });
+    notify("Feedback enviado");
+  }
+
   async function createClient(input: Pick<Client, "name" | "instagram_handle" | "phone" | "brand_color" | "email" | "invite_code"> & {
     avatar_file?: File | null;
   }) {
@@ -1500,7 +2156,6 @@ export function ReveeApp() {
   }
 
   async function uploadProfileImage(file: File, folder: string) {
-    let url = URL.createObjectURL(file);
     if (supabase) {
       const safeName = file.name.replace(/[^a-z0-9.]+/gi, "-").toLowerCase();
       const path = `profiles/${folder}/${Date.now()}-${safeName}`;
@@ -1508,12 +2163,14 @@ export function ReveeApp() {
         cacheControl: "3600",
         upsert: true
       });
-      if (!error) {
-        const { data } = supabase.storage.from("post-media").getPublicUrl(path);
-        url = data.publicUrl;
+      if (error) {
+        notify("Não consegui salvar a imagem no Supabase. Tente enviar novamente.");
+        throw new Error(error.message);
       }
+      const { data } = supabase.storage.from("post-media").getPublicUrl(path);
+      return data.publicUrl;
     }
-    return url;
+    return URL.createObjectURL(file);
   }
 
   async function createPost(input: {
@@ -1644,6 +2301,7 @@ export function ReveeApp() {
       const path = `${postId}/${Date.now()}-${safeName}`;
       const { error } = await supabase.storage.from("post-media").upload(path, file, {
         cacheControl: "3600",
+        contentType: getUploadContentType(file),
         upsert: true
       });
       if (!error) {
@@ -2675,22 +3333,35 @@ function AgencyHero({
 
 function CalendarView({
   posts,
+  campaigns,
   stats,
+  monthFilter,
   isClient,
   onOpenPost,
+  onOpenCampaign,
   onNewPost,
   onMovePost,
   onStatusFilter
 }: {
   posts: Post[];
-  stats: { total: number; approved: number; awaiting: number; revision: number };
+  campaigns: Campaign[];
+  stats: { total: number; approved: number; awaiting: number; revision: number; activeCampaigns: number; campaignAwaiting: number; campaignRevision: number; campaignFinished: number };
+  monthFilter: string;
   isClient: boolean;
   onOpenPost: (post: Post) => void;
+  onOpenCampaign: (campaign: Campaign) => void;
   onNewPost: (date?: string) => void;
   onMovePost: (postId: string, date: string) => void;
   onStatusFilter: (status: StatusFilter) => void;
 }) {
-  const [date, setDate] = useState(new Date(2026, 4, 1));
+  const [date, setDate] = useState(() => {
+    const key = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+    return new Date(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
+  });
+  useEffect(() => {
+    if (monthFilter === "all") return;
+    setDate(new Date(Number(monthFilter.slice(0, 4)), Number(monthFilter.slice(5, 7)) - 1, 1));
+  }, [monthFilter]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const year = date.getFullYear();
   const month = date.getMonth();
@@ -2720,8 +3391,10 @@ function CalendarView({
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <StatCard label="Posts este mês" value={stats.total} hint="total de conteúdos" icon={CalendarDays} onClick={() => onStatusFilter("all")} />
         <StatCard label="Aguardando" value={stats.awaiting} hint="pendentes do cliente" icon={Clock} onClick={() => onStatusFilter("awaiting_approval")} />
-        <StatCard label="Aprovados" value={stats.approved} hint={`${stats.total ? Math.round((stats.approved / stats.total) * 100) : 0}% do total`} icon={ShieldCheck} onClick={() => onStatusFilter("approved")} />
-        <StatCard label="Revisões" value={stats.revision} hint="precisam de ajuste" icon={RefreshCw} onClick={() => onStatusFilter("revision_requested")} />
+        <StatCard label="Campanhas ativas" value={stats.activeCampaigns} hint="no mês filtrado" icon={Megaphone} />
+        <StatCard label="Campanhas em aprovação" value={stats.campaignAwaiting} hint="pendentes do cliente" icon={ShieldCheck} />
+        <StatCard label="Campanhas em revisão" value={stats.campaignRevision} hint="com feedback do cliente" icon={RefreshCw} />
+        <StatCard label="Campanhas finalizadas" value={stats.campaignFinished} hint="encerradas no filtro" icon={Check} />
       </div>
       <div className="premium-card overflow-hidden rounded-[18px]">
         <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:px-5">
@@ -2740,6 +3413,8 @@ function CalendarView({
           </button>
         </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <div className="glass-scroll overflow-x-auto">
+            <div className="min-w-[760px] sm:min-w-0">
           <div className="grid grid-cols-7 bg-primary text-center text-[10px] font-bold uppercase tracking-0 text-white sm:text-[10px] sm:tracking-[0.12em] sm:text-white/75">
             {[
               ["D", "Dom"],
@@ -2762,11 +3437,15 @@ function CalendarView({
                 key={`${cell.iso || index}`}
                 cell={cell}
                 posts={posts.filter((post) => post.scheduled_date === cell.iso)}
+                campaigns={campaigns.filter((campaign) => campaign.start_date === cell.iso)}
                 isClient={isClient}
                 onOpenPost={onOpenPost}
+                onOpenCampaign={onOpenCampaign}
                 onNewPost={() => onNewPost(cell.iso)}
               />
             ))}
+          </div>
+            </div>
           </div>
         </DndContext>
       </div>
@@ -2777,24 +3456,28 @@ function CalendarView({
 function CalendarCell({
   cell,
   posts,
+  campaigns,
   isClient,
   onOpenPost,
+  onOpenCampaign,
   onNewPost
 }: {
   cell: { day: number; muted: boolean; iso: string };
   posts: Post[];
+  campaigns: Campaign[];
   isClient: boolean;
   onOpenPost: (post: Post) => void;
+  onOpenCampaign: (campaign: Campaign) => void;
   onNewPost: () => void;
 }) {
   const { setNodeRef } = useSortable({ id: cell.iso || `empty-${cell.day}`, disabled: !cell.iso });
-  if (cell.muted) return <div className="min-h-[72px] border-b border-r border-line bg-[#f7f7f7]/70 sm:min-h-[124px]" />;
+  if (cell.muted) return <div className="min-h-[126px] border-b border-r border-line bg-[#f7f7f7]/70 sm:min-h-[158px]" />;
   const hasAttention = posts.some((post) => getDueSignal(post)?.tone === "danger");
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "group min-h-[72px] border-b border-r border-line bg-white p-1 transition hover:bg-[#fafafe] sm:min-h-[124px] sm:p-2.5",
+        "group min-h-[126px] border-b border-r border-line bg-white p-2 transition hover:bg-[#fafafe] sm:min-h-[158px] sm:p-3",
         hasAttention && "calendar-cell-attention"
       )}
     >
@@ -2822,9 +3505,32 @@ function CalendarCell({
         )}
       </div>
       <div className="space-y-1.5">
+        {campaigns.map((campaign) => <CalendarCampaign key={campaign.id} campaign={campaign} onClick={() => onOpenCampaign(campaign)} />)}
         {posts.map((post) => <CalendarPost key={post.id} post={post} isClient={isClient} onClick={() => onOpenPost(post)} />)}
       </div>
     </div>
+  );
+}
+
+function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: () => void }) {
+  const meta = campaignStatusMeta[campaign.status];
+  return (
+    <button
+      onClick={onClick}
+      className="w-full rounded-xl border border-accent/25 bg-accent-light/70 px-3 py-2.5 text-left text-[11px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft sm:px-3.5 sm:py-3 sm:text-xs"
+    >
+      <span className="mb-1.5 inline-flex rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-accent-dark">
+        Campanha
+      </span>
+      <span className="flex items-start gap-2">
+        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
+        <span className="min-w-0 flex-1 truncate">{campaign.title}</span>
+      </span>
+      <span className="mt-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-80">
+        <span>{campaign.platform}</span>
+        <span>{meta.label}</span>
+      </span>
+    </button>
   );
 }
 
@@ -2832,6 +3538,7 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: post.id, disabled: isClient });
   const meta = statusMeta[post.status];
   const signal = getDueSignal(post);
+  const formatBadge = getPostFormatBadge(post);
   return (
     <button
       ref={setNodeRef}
@@ -2839,16 +3546,19 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className="calendar-post-pill group/post w-full rounded-md px-1 py-1 text-left text-[9px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft sm:rounded-lg sm:px-2 sm:py-1.5 sm:text-[11px]"
+      className="calendar-post-pill group/post w-full rounded-xl px-3 py-2.5 text-left text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft sm:px-3.5 sm:py-3 sm:text-xs"
     >
-      <span className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: meta.color }} />
-        <span className="truncate">{post.title}</span>
+      <span className="flex items-start gap-2">
+        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
+        <span className="min-w-0 flex-1 truncate">{post.title}</span>
       </span>
-      <span className="mt-1 hidden items-center justify-between gap-2 text-[9px] font-semibold uppercase tracking-[0.12em] opacity-75 sm:flex">
+      <span className="mt-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-80">
         <span>{post.scheduled_time || "--:--"}</span>
-        <span>{getPostTypeLabel(post)}</span>
-        {signal && <span>{signal.label}</span>}
+        <span className="rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
+      </span>
+      <span className="mt-1 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
+        <span>{formatBadge.detail}</span>
+        {signal && <span className="text-right">{signal.label}</span>}
       </span>
     </button>
   );
@@ -2858,13 +3568,17 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
 
 function PipelineView({
   posts,
+  campaigns,
   isClient,
   onOpenPost,
+  onOpenCampaign,
   onMove
 }: {
   posts: Post[];
+  campaigns: Campaign[];
   isClient: boolean;
   onOpenPost: (post: Post) => void;
+  onOpenCampaign: (campaign: Campaign) => void;
   onMove: (postId: string, stage: PipelineStage) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -2881,8 +3595,10 @@ function PipelineView({
             key={stage}
             stage={stage}
             posts={posts.filter((post) => post.pipeline_stage === stage)}
+            campaigns={campaigns.filter((campaign) => campaignStage(campaign.status) === stage)}
             isClient={isClient}
             onOpenPost={onOpenPost}
+            onOpenCampaign={onOpenCampaign}
           />
         ))}
       </div>
@@ -2893,13 +3609,17 @@ function PipelineView({
 function PipelineColumn({
   stage,
   posts,
+  campaigns,
   isClient,
-  onOpenPost
+  onOpenPost,
+  onOpenCampaign
 }: {
   stage: PipelineStage;
   posts: Post[];
+  campaigns: Campaign[];
   isClient: boolean;
   onOpenPost: (post: Post) => void;
+  onOpenCampaign: (campaign: Campaign) => void;
 }) {
   const { setNodeRef } = useSortable({ id: stage });
   const style = pipelineStyle[stage];
@@ -2912,15 +3632,16 @@ function PipelineColumn({
             <h3 className="truncate text-sm font-semibold">{pipelineMeta[stage].label}</h3>
           </div>
           <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: style.bg, color: style.accent }}>
-            {posts.length}
+            {posts.length + campaigns.length}
           </span>
         </div>
         <p className="mt-1 text-xs text-muted">{pipelineMeta[stage].description}</p>
       </div>
       <SortableContext items={posts.map((post) => post.id)} strategy={verticalListSortingStrategy}>
         <div className="space-y-2.5">
+          {campaigns.map((campaign) => <CampaignPipelineCard key={campaign.id} campaign={campaign} onClick={() => onOpenCampaign(campaign)} />)}
           {posts.map((post) => <PipelineCard key={post.id} post={post} isClient={isClient} onClick={() => onOpenPost(post)} />)}
-          {!posts.length && (
+          {!posts.length && !campaigns.length && (
             <div className="soft-panel rounded-xl px-3 py-6 text-center text-xs leading-5 text-muted">
               Nenhum conteúdo nesta etapa.
             </div>
@@ -2928,6 +3649,35 @@ function PipelineColumn({
         </div>
       </SortableContext>
     </div>
+  );
+}
+
+function CampaignPipelineCard({ campaign, onClick }: { campaign: Campaign; onClick: () => void }) {
+  const meta = campaignStatusMeta[campaign.status];
+  return (
+    <button
+      onClick={onClick}
+      className="premium-card-hover w-full rounded-xl border border-accent/25 bg-accent-light/45 p-3 text-left"
+    >
+      <div className="mb-2 flex items-start gap-2">
+        <Megaphone className="mt-0.5 h-3.5 w-3.5 text-accent" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-accent-dark">Campanha</span>
+          </div>
+          <div className="mt-1 truncate text-sm font-semibold">{campaign.title}</div>
+          <div className="mt-1 text-xs text-muted">{campaign.platform} · {getCampaignPeriod(campaign)}</div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+        {campaign.daily_budget ? <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-muted">{formatCurrency(campaign.daily_budget)}/dia</span> : null}
+      </div>
+      <div className="mt-3 grid gap-1.5 text-[11px] leading-4 text-muted">
+        <span>{campaign.responsible_name || "Responsavel nao informado"}</span>
+        {campaign.audience && <span className="line-clamp-2">{campaign.audience}</span>}
+      </div>
+    </button>
   );
 }
 
@@ -3878,6 +4628,7 @@ function PostModal({
   }
 
   function replaceEditMedia(index: number, file: File) {
+    if (warnUnsupportedVideos([file])) return;
     const replacement: PostMedia & { sourceFile: File } = {
       id: `local-replace-${crypto.randomUUID()}`,
       post_id: currentPostId,
@@ -3891,6 +4642,7 @@ function PostModal({
 
   function addEditMedia(files: File[]) {
     if (!files.length) return;
+    if (warnUnsupportedVideos(files)) return;
     setEditMedia((current) => [
       ...current,
       ...files.map((file, index) => ({
@@ -3968,7 +4720,7 @@ function PostModal({
               <div className="relative aspect-[4/5] bg-accent-light">
                 {current
                   ? current.media_type === "video"
-                    ? <video key={current.id} src={current.media_url} poster={current.thumbnail_url ?? undefined} controls preload="auto" playsInline className="h-full w-full object-contain" />
+                    ? <VideoPlayer key={current.id} media={current} title={post.title} />
                     : <img key={current.id} src={current.media_url} alt="" className="h-full w-full object-contain" decoding="async" />
                   : <div className="flex h-full items-center justify-center text-muted"><ImagePlus className="h-10 w-10" /></div>}
                 {media.length > 1 && (
@@ -4062,7 +4814,7 @@ function PostModal({
                       Adicionar
                       <input
                         type="file"
-                        accept="image/*,video/*"
+                        accept="image/*,video/mp4,video/webm"
                         multiple
                         className="hidden"
                         onChange={(event) => {
@@ -4091,7 +4843,7 @@ function PostModal({
                           <button className="rounded-md p-1.5 text-muted hover:bg-accent-light hover:text-primary" onClick={() => moveEditMedia(index, 1)} disabled={index === orderedEditMedia.length - 1} title="Descer slide"><ChevronRight className="h-3.5 w-3.5 rotate-90" /></button>
                           <label className="cursor-pointer rounded-md p-1.5 text-muted hover:bg-accent-light hover:text-primary" title="Substituir slide">
                             <Upload className="h-3.5 w-3.5" />
-                            <input type="file" accept="image/*,video/*" className="hidden" onChange={(event) => {
+                            <input type="file" accept="image/*,video/mp4,video/webm" className="hidden" onChange={(event) => {
                               const file = event.target.files?.[0];
                               if (file) replaceEditMedia(index, file);
                               event.currentTarget.value = "";
@@ -4575,10 +5327,17 @@ function PostFormModal({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={contentFormat === "video" ? "video/mp4,video/webm" : "image/*,video/mp4,video/webm"}
         multiple
         className="hidden"
-            onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
+        onChange={(event) => {
+          const selectedFiles = Array.from(event.target.files ?? []);
+          if (warnUnsupportedVideos(selectedFiles)) {
+            event.currentTarget.value = "";
+            return;
+          }
+          setFiles(selectedFiles);
+        }}
       />
       {!!files.length && (
         <div className="mb-4 flex flex-wrap gap-2">
@@ -4618,6 +5377,465 @@ function PostFormModal({
         Salvar conteúdo
       </button>
     </ModalFrame>
+  );
+}
+
+function CampaignsView({
+  campaigns,
+  clients,
+  canEdit,
+  onOpen,
+  onNew,
+  onEdit
+}: {
+  campaigns: Campaign[];
+  clients: Client[];
+  canEdit: boolean;
+  onOpen: (campaign: Campaign) => void;
+  onNew: () => void;
+  onEdit: (campaign: Campaign) => void;
+}) {
+  if (!campaigns.length) return (
+    <EmptyState
+      title="Nenhuma campanha no mês"
+      description="Crie campanhas de tráfego pago para aprovar objetivo, criativos, copy e orçamento com o cliente."
+      action={canEdit ? { label: "Nova campanha", onClick: onNew } : undefined}
+    />
+  );
+  return (
+    <div className="space-y-4">
+      {canEdit && (
+        <div className="flex justify-end">
+          <button className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-soft" onClick={onNew}>
+            <Plus className="h-4 w-4" /> Nova campanha
+          </button>
+        </div>
+      )}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {campaigns.map((campaign) => {
+          const client = clients.find((item) => item.id === campaign.client_id);
+          const meta = campaignStatusMeta[campaign.status];
+          return (
+            <button key={campaign.id} onClick={() => onOpen(campaign)} className="premium-card premium-card-hover rounded-[18px] border-accent/10 p-4 text-left">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="mb-2 inline-flex rounded-full bg-accent-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-accent-dark">Campanha</span>
+                  <h3 className="truncate text-base font-semibold text-primary">{campaign.title}</h3>
+                  <p className="mt-1 text-sm text-muted">{client?.name ?? "Cliente"} · {campaign.platform}</p>
+                </div>
+                <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+              </div>
+              <div className="grid gap-3 text-sm text-muted sm:grid-cols-2">
+                <InfoMini label="Orçamento diário" value={campaign.daily_budget ? formatCurrency(campaign.daily_budget) : "Nao informado"} />
+                <InfoMini label="Período" value={getCampaignPeriod(campaign)} />
+                <InfoMini label="Responsável" value={campaign.responsible_name || "Nao informado"} />
+                <InfoMini label="Total" value={campaign.total_budget ? formatCurrency(campaign.total_budget) : "Nao informado"} />
+              </div>
+              {campaign.objective && <p className="mt-4 line-clamp-2 text-sm leading-6 text-muted">{campaign.objective}</p>}
+              {canEdit && <button className="mt-4 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-primary hover:bg-accent-light" onClick={(event) => { event.stopPropagation(); onEdit(campaign); }}>Editar</button>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MonthlyGoalsView({
+  goals,
+  clients,
+  monthFilter,
+  canEdit,
+  onOpen,
+  onNew,
+  onEdit
+}: {
+  goals: MonthlyGoal[];
+  clients: Client[];
+  monthFilter: string;
+  canEdit: boolean;
+  onOpen: (goal: MonthlyGoal) => void;
+  onNew: () => void;
+  onEdit: (goal: MonthlyGoal) => void;
+}) {
+  const headline = monthFilter === "all" ? "Estratégia mensal" : `${months[Number(monthFilter.slice(5, 7)) - 1]} ${monthFilter.slice(0, 4)}`;
+  return (
+    <div className="space-y-5">
+      <div className="premium-card rounded-[18px] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Objetivos do mês</p>
+            <h2 className="mt-1 text-xl font-semibold text-primary">{headline}</h2>
+          </div>
+          {canEdit && <button className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-soft" onClick={onNew}><Plus className="h-4 w-4" /> Novo objetivo</button>}
+        </div>
+      </div>
+      {!goals.length ? (
+        <EmptyState title="Nenhum objetivo cadastrado" description="Registre metas, ações planejadas e resultados esperados para o cliente acompanhar." />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {goals.map((goal) => {
+            const client = clients.find((item) => item.id === goal.client_id);
+            const meta = monthlyGoalStatusMeta[goal.status];
+            return (
+              <button key={goal.id} onClick={() => onOpen(goal)} className="premium-card premium-card-hover rounded-[18px] p-5 text-left">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold text-primary">{goal.title}</h3>
+                    <p className="mt-1 text-sm text-muted">{client?.name ?? "Cliente"} · {months[goal.month - 1]} {goal.year}</p>
+                  </div>
+                  <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+                </div>
+                {goal.description && <p className="line-clamp-3 text-sm leading-6 text-muted">{goal.description}</p>}
+                {goal.planned_actions && <div className="mt-4 rounded-[14px] bg-[#fbfbfb] p-3 text-xs leading-5 text-muted whitespace-pre-line">{goal.planned_actions}</div>}
+                {canEdit && <button className="mt-4 rounded-lg border border-line px-3 py-2 text-xs font-semibold text-primary hover:bg-accent-light" onClick={(event) => { event.stopPropagation(); onEdit(goal); }}>Editar</button>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[14px] bg-[#fbfbfb] px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</div>
+      <div className="mt-1 truncate text-sm font-semibold text-primary">{value}</div>
+    </div>
+  );
+}
+
+function CampaignFormModal({
+  open,
+  clients,
+  activeClientId,
+  campaign,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  clients: Client[];
+  activeClientId: string;
+  campaign: Campaign | null;
+  onClose: () => void;
+  onSave: (input: CampaignFormInput) => Promise<void>;
+}) {
+  const [form, setForm] = useState<CampaignFormInput>({
+    client_id: activeClientId,
+    title: "",
+    objective: "",
+    platform: "Meta Ads",
+    audience: "",
+    daily_budget: "",
+    total_budget: "",
+    start_date: new Date().toISOString().slice(0, 10),
+    end_date: new Date().toISOString().slice(0, 10),
+    status: "creating",
+    responsible_name: "",
+    copy: "",
+    internal_notes: "",
+    client_feedback: "",
+    files: []
+  });
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      client_id: campaign?.client_id ?? activeClientId,
+      title: campaign?.title ?? "",
+      objective: campaign?.objective ?? "",
+      platform: (campaign?.platform as CampaignPlatform) ?? "Meta Ads",
+      audience: campaign?.audience ?? "",
+      daily_budget: campaign?.daily_budget ? String(campaign.daily_budget) : "",
+      total_budget: campaign?.total_budget ? String(campaign.total_budget) : "",
+      start_date: campaign?.start_date ?? new Date().toISOString().slice(0, 10),
+      end_date: campaign?.end_date ?? campaign?.start_date ?? new Date().toISOString().slice(0, 10),
+      status: campaign?.status ?? "creating",
+      responsible_name: campaign?.responsible_name ?? "",
+      copy: campaign?.copy ?? "",
+      internal_notes: campaign?.internal_notes ?? "",
+      client_feedback: campaign?.client_feedback ?? "",
+      files: []
+    });
+  }, [activeClientId, campaign, open]);
+  if (!open) return null;
+  const update = <K extends keyof CampaignFormInput>(key: K, value: CampaignFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+  return (
+    <ModalFrame title={campaign ? "Editar campanha" : "Nova campanha"} onClose={onClose}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field label="Nome da campanha" value={form.title} onChange={(value) => update("title", value)} />
+        <SelectBox label="Cliente" value={form.client_id} onChange={(value) => update("client_id", value)}>
+          {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+        </SelectBox>
+        <SelectBox label="Plataforma" value={form.platform} onChange={(value) => update("platform", value as CampaignPlatform)}>
+          {campaignPlatforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
+        </SelectBox>
+        <SelectBox label="Status" value={form.status} onChange={(value) => update("status", value as CampaignStatus)}>
+          {Object.entries(campaignStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+        </SelectBox>
+        <Field label="Orçamento diário" value={form.daily_budget} onChange={(value) => update("daily_budget", value)} inputMode="decimal" />
+        <Field label="Orçamento total" value={form.total_budget} onChange={(value) => update("total_budget", value)} inputMode="decimal" />
+        <Field label="Data de início" type="date" value={form.start_date} onChange={(value) => update("start_date", value)} />
+        <Field label="Data de fim" type="date" value={form.end_date} onChange={(value) => update("end_date", value)} />
+        <Field label="Responsável" value={form.responsible_name} onChange={(value) => update("responsible_name", value)} />
+      </div>
+      <TextAreaBox label="Objetivo da campanha" value={form.objective} onChange={(value) => update("objective", value)} />
+      <TextAreaBox label="Público-alvo" value={form.audience} onChange={(value) => update("audience", value)} />
+      <TextAreaBox label="Copy da campanha" value={form.copy} onChange={(value) => update("copy", value)} />
+      <TextAreaBox label="Observações internas" value={form.internal_notes} onChange={(value) => update("internal_notes", value)} />
+      <button type="button" className="mb-3 flex w-full flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-accent/60 bg-accent-light/40 px-4 py-7 text-sm font-semibold text-accent-dark" onClick={() => inputRef.current?.click()}>
+        <Upload className="h-5 w-5" /> Adicionar criativos
+      </button>
+      <input ref={inputRef} type="file" accept="image/*,video/mp4,video/webm" multiple className="hidden" onChange={(event) => update("files", Array.from(event.target.files ?? []))} />
+      {!!form.files.length && <div className="mb-4 flex flex-wrap gap-2">{form.files.map((file) => <span key={file.name} className="rounded-full bg-[#f7f7f7] px-3 py-1 text-xs font-semibold text-muted">{file.name}</span>)}</div>}
+      <button disabled={saving || !form.title || !form.client_id || !form.start_date} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } finally { setSaving(false); } }}>
+        {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar campanha
+      </button>
+    </ModalFrame>
+  );
+}
+
+function MonthlyGoalFormModal({
+  open,
+  clients,
+  activeClientId,
+  goal,
+  monthFilter,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  clients: Client[];
+  activeClientId: string;
+  goal: MonthlyGoal | null;
+  monthFilter: string;
+  onClose: () => void;
+  onSave: (input: MonthlyGoalFormInput) => Promise<void>;
+}) {
+  const currentMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+  const [form, setForm] = useState<MonthlyGoalFormInput>({
+    client_id: activeClientId,
+    month: Number(currentMonth.slice(5, 7)),
+    year: Number(currentMonth.slice(0, 4)),
+    title: "",
+    description: "",
+    planned_actions: "",
+    responsible_name: "",
+    status: "planned",
+    client_feedback: "",
+    result_notes: ""
+  });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const baseMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+    setForm({
+      client_id: goal?.client_id ?? activeClientId,
+      month: goal?.month ?? Number(baseMonth.slice(5, 7)),
+      year: goal?.year ?? Number(baseMonth.slice(0, 4)),
+      title: goal?.title ?? "",
+      description: goal?.description ?? "",
+      planned_actions: goal?.planned_actions ?? "",
+      responsible_name: goal?.responsible_name ?? "",
+      status: goal?.status ?? "planned",
+      client_feedback: goal?.client_feedback ?? "",
+      result_notes: goal?.result_notes ?? ""
+    });
+  }, [activeClientId, goal, monthFilter, open]);
+  if (!open) return null;
+  const update = <K extends keyof MonthlyGoalFormInput>(key: K, value: MonthlyGoalFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+  return (
+    <ModalFrame title={goal ? "Editar objetivo" : "Novo objetivo do mês"} onClose={onClose}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Field label="Título" value={form.title} onChange={(value) => update("title", value)} />
+        <SelectBox label="Cliente" value={form.client_id} onChange={(value) => update("client_id", value)}>
+          {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+        </SelectBox>
+        <Field label="Mês" type="number" value={String(form.month)} onChange={(value) => update("month", Number(value))} />
+        <Field label="Ano" type="number" value={String(form.year)} onChange={(value) => update("year", Number(value))} />
+        <Field label="Responsável" value={form.responsible_name} onChange={(value) => update("responsible_name", value)} />
+        <SelectBox label="Status" value={form.status} onChange={(value) => update("status", value as MonthlyGoalStatus)}>
+          {Object.entries(monthlyGoalStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+        </SelectBox>
+      </div>
+      <TextAreaBox label="Descrição" value={form.description} onChange={(value) => update("description", value)} />
+      <TextAreaBox label="Ações planejadas" value={form.planned_actions} onChange={(value) => update("planned_actions", value)} />
+      <TextAreaBox label="Conclusão / resultado" value={form.result_notes} onChange={(value) => update("result_notes", value)} />
+      <button disabled={saving || !form.title || !form.client_id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } finally { setSaving(false); } }}>
+        {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar objetivo
+      </button>
+    </ModalFrame>
+  );
+}
+
+function SelectBox({ label, value, onChange, children }: { label: string; value: string; onChange: (value: string) => void; children: ReactNode }) {
+  return (
+    <label className="mb-4 block">
+      <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="premium-input w-full rounded-xl border border-border-mid bg-white px-3.5 py-3 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15">
+        {children}
+      </select>
+    </label>
+  );
+}
+
+function TextAreaBox({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="mb-4 block">
+      <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} className="min-h-24 w-full rounded-xl border border-border-mid bg-white p-3 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15" />
+    </label>
+  );
+}
+
+function CampaignModal({
+  campaign,
+  client,
+  history,
+  isClient,
+  canEdit,
+  onClose,
+  onEdit,
+  onApprove,
+  onRevision
+}: {
+  campaign: Campaign | null;
+  client: Client | null;
+  history: ActivityHistory[];
+  isClient: boolean;
+  canEdit: boolean;
+  onClose: () => void;
+  onEdit: (campaign: Campaign) => void;
+  onApprove: (campaign: Campaign) => Promise<void>;
+  onRevision: (campaign: Campaign, feedback: string) => Promise<void>;
+}) {
+  const [feedback, setFeedback] = useState("");
+  if (!campaign) return null;
+  const meta = campaignStatusMeta[campaign.status];
+  return (
+    <ModalFrame title="Campanha" onClose={onClose}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <span className="mb-2 inline-flex rounded-full bg-accent-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-accent-dark">Campanha</span>
+          <h2 className="text-xl font-semibold text-primary">{campaign.title}</h2>
+          <p className="mt-1 text-sm text-muted">{client?.name ?? "Cliente"} · {campaign.platform}</p>
+        </div>
+        <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+      </div>
+      {!!campaign.media.length && (
+        <div className="mb-5 grid gap-3 sm:grid-cols-2">
+          {campaign.media.map((media) => (
+            media.type === "video" ? (
+              <video key={media.id} src={media.url} controls playsInline preload="metadata" className="aspect-video w-full rounded-[16px] bg-black object-contain" />
+            ) : (
+              <img key={media.id} src={media.url} alt="" className="aspect-video w-full rounded-[16px] object-cover" />
+            )
+          ))}
+        </div>
+      )}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <InfoMini label="Objetivo" value={campaign.objective || "Nao informado"} />
+        <InfoMini label="Período" value={getCampaignPeriod(campaign)} />
+        <InfoMini label="Orçamento diário" value={campaign.daily_budget ? formatCurrency(campaign.daily_budget) : "Nao informado"} />
+        <InfoMini label="Orçamento total" value={campaign.total_budget ? formatCurrency(campaign.total_budget) : "Nao informado"} />
+        <InfoMini label="Responsável" value={campaign.responsible_name || "Nao informado"} />
+        <InfoMini label="Público" value={campaign.audience || "Nao informado"} />
+      </div>
+      {campaign.copy && <DetailBlock title="Copy da campanha" text={campaign.copy} />}
+      {campaign.internal_notes && !isClient && <DetailBlock title="Observações internas" text={campaign.internal_notes} />}
+      {campaign.client_feedback && <DetailBlock title="Feedback do cliente" text={campaign.client_feedback} />}
+      {isClient && campaign.status === "awaiting_approval" && (
+        <div className="mt-5 rounded-[16px] border border-line p-4">
+          <TextAreaBox label="Feedback para revisão" value={feedback} onChange={setFeedback} />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button className="rounded-lg border border-line px-4 py-3 text-sm font-semibold text-primary hover:bg-accent-light" onClick={() => onRevision(campaign, feedback)}>Solicitar revisão</button>
+            <button className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white" onClick={() => onApprove(campaign)}>Aprovar campanha</button>
+          </div>
+        </div>
+      )}
+      {canEdit && <button className="mt-5 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white" onClick={() => onEdit(campaign)}>Editar campanha</button>}
+      <HistoryTimeline history={history} />
+    </ModalFrame>
+  );
+}
+
+function MonthlyGoalModal({
+  goal,
+  client,
+  history,
+  isClient,
+  canEdit,
+  onClose,
+  onEdit,
+  onFeedback
+}: {
+  goal: MonthlyGoal | null;
+  client: Client | null;
+  history: ActivityHistory[];
+  isClient: boolean;
+  canEdit: boolean;
+  onClose: () => void;
+  onEdit: (goal: MonthlyGoal) => void;
+  onFeedback: (goal: MonthlyGoal, feedback: string) => Promise<void>;
+}) {
+  const [feedback, setFeedback] = useState(goal?.client_feedback ?? "");
+  useEffect(() => setFeedback(goal?.client_feedback ?? ""), [goal?.client_feedback]);
+  if (!goal) return null;
+  const meta = monthlyGoalStatusMeta[goal.status];
+  return (
+    <ModalFrame title="Objetivo do mês" onClose={onClose}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{months[goal.month - 1]} {goal.year}</p>
+          <h2 className="mt-1 text-xl font-semibold text-primary">{goal.title}</h2>
+          <p className="mt-1 text-sm text-muted">{client?.name ?? "Cliente"} · {goal.responsible_name || "Responsavel nao informado"}</p>
+        </div>
+        <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: meta.bg, color: meta.color }}>{meta.label}</span>
+      </div>
+      {goal.description && <DetailBlock title="Descrição" text={goal.description} />}
+      {goal.planned_actions && <DetailBlock title="Ações planejadas" text={goal.planned_actions} />}
+      {goal.result_notes && <DetailBlock title="Conclusão / resultado" text={goal.result_notes} />}
+      {isClient && (
+        <div className="mt-5 rounded-[16px] border border-line p-4">
+          <TextAreaBox label="Feedback geral" value={feedback} onChange={setFeedback} />
+          <button className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white" onClick={() => onFeedback(goal, feedback)}>Enviar feedback</button>
+        </div>
+      )}
+      {canEdit && <button className="mt-5 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white" onClick={() => onEdit(goal)}>Editar objetivo</button>}
+      <HistoryTimeline history={history} />
+    </ModalFrame>
+  );
+}
+
+function DetailBlock({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="mt-4 rounded-[16px] bg-[#fbfbfb] p-4">
+      <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted">{title}</div>
+      <p className="mt-2 whitespace-pre-line text-sm leading-6 text-primary">{text}</p>
+    </div>
+  );
+}
+
+function HistoryTimeline({ history }: { history: ActivityHistory[] }) {
+  if (!history.length) return null;
+  return (
+    <div className="mt-6 border-t border-line pt-5">
+      <h3 className="text-sm font-semibold text-primary">Histórico de alterações</h3>
+      <div className="mt-3 space-y-3">
+        {history.map((item) => (
+          <div key={item.id} className="flex gap-3 text-sm">
+            <span className="mt-1 h-2 w-2 rounded-full bg-accent" />
+            <div>
+              <div className="font-semibold text-primary">{item.description || item.action}</div>
+              <div className="mt-0.5 text-xs text-muted">{formatTimelineDate(item.created_at)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -5399,6 +6617,43 @@ function ConfirmDialog({
 }
 
 // ─── StatusPill ──────────────────────────────────────────────────────────────
+
+function VideoPlayer({ media, title }: { media: PostMedia; title: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="relative h-full w-full bg-black">
+      {!failed ? (
+        <video
+          src={media.media_url}
+          poster={media.thumbnail_url ?? undefined}
+          controls
+          preload="auto"
+          playsInline
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
+          {media.thumbnail_url && <img src={media.thumbnail_url} alt="" className="max-h-[68%] rounded-xl object-contain opacity-75" />}
+          <div>
+            <div className="text-sm font-semibold">Não foi possível reproduzir este vídeo no navegador.</div>
+            <p className="mt-2 text-xs leading-5 text-white/70">
+              Alguns arquivos, como vídeos em MOV ou codecs de celular, precisam ser enviados em MP4 para tocar direto aqui.
+            </p>
+          </div>
+          <div className="flex flex-wrap justify-center gap-2">
+            <a className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-primary" href={media.media_url} target="_blank" rel="noreferrer">
+              Abrir vídeo
+            </a>
+            <a className="rounded-xl border border-white/40 px-4 py-2 text-xs font-semibold text-white" href={media.media_url} download={title}>
+              Baixar
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function StatusPill({ status }: { status: ContentStatus }) {
   const meta = statusMeta[status];

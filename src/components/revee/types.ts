@@ -1,6 +1,6 @@
 import type { ElementType } from "react";
 
-export type View = "calendar" | "pipeline" | "feed" | "contents" | "clients" | "team" | "billing" | "workspace";
+export type View = "calendar" | "pipeline" | "feed" | "contents" | "campaigns" | "goals" | "clients" | "team" | "billing" | "workspace";
 
 export type ViewItem = {
   id: View;

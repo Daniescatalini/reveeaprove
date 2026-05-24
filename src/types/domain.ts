@@ -36,6 +36,7 @@ export type Agency = {
   name: string;
   owner_id: string;
   billing_document?: string | null;
+  workspace_settings?: Record<string, unknown> | null;
 };
 
 export type Client = {
@@ -109,6 +110,11 @@ export type BillingCycle = "monthly" | "annual";
 export type SubscriptionStatus = "trial" | "active" | "past_due" | "suspended" | "cancelled" | "exempt";
 export type BillingPaymentStatus = "pending" | "confirmed" | "received" | "overdue" | "failed" | "cancelled" | "refunded";
 export type ReferralStatus = "pending" | "active" | "converted" | "credited" | "cancelled";
+export type CampaignStatus = "creating" | "awaiting_approval" | "approved" | "active" | "paused" | "finished" | "revision_requested";
+export type CampaignPlatform = "Meta Ads" | "Google Ads" | "TikTok Ads" | "Pinterest Ads" | "Outra";
+export type MonthlyGoalStatus = "planned" | "in_progress" | "done" | "paused" | "cancelled";
+export type ActivityItemType = "post" | "campaign" | "monthly_goal";
+export type NotificationItemType = ActivityItemType | "billing" | "referral";
 
 export type Subscription = {
   id: string;
@@ -151,6 +157,81 @@ export type BillingEvent = {
   event_type: string;
   description?: string | null;
   raw_payload?: Record<string, unknown> | null;
+  created_at: string;
+};
+
+export type CampaignMedia = {
+  id: string;
+  campaign_id: string;
+  url: string;
+  type: MediaType;
+  order_index: number;
+  created_at?: string | null;
+};
+
+export type Campaign = {
+  id: string;
+  agency_id: string;
+  client_id: string;
+  title: string;
+  objective?: string | null;
+  platform: CampaignPlatform | string;
+  audience?: string | null;
+  daily_budget?: number | null;
+  total_budget?: number | null;
+  start_date: string;
+  end_date?: string | null;
+  status: CampaignStatus;
+  responsible_user_id?: string | null;
+  responsible_name?: string | null;
+  copy?: string | null;
+  internal_notes?: string | null;
+  client_feedback?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  media: CampaignMedia[];
+};
+
+export type MonthlyGoal = {
+  id: string;
+  agency_id: string;
+  client_id: string;
+  month: number;
+  year: number;
+  title: string;
+  description?: string | null;
+  planned_actions?: string | null;
+  responsible_user_id?: string | null;
+  responsible_name?: string | null;
+  status: MonthlyGoalStatus;
+  client_feedback?: string | null;
+  result_notes?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type ActivityHistory = {
+  id: string;
+  agency_id: string;
+  client_id?: string | null;
+  item_type: ActivityItemType;
+  item_id: string;
+  action: string;
+  user_id?: string | null;
+  description?: string | null;
+  created_at: string;
+};
+
+export type StoredNotification = {
+  id: string;
+  agency_id: string;
+  client_id?: string | null;
+  recipient_user_id?: string | null;
+  item_type: NotificationItemType;
+  item_id?: string | null;
+  title: string;
+  detail?: string | null;
+  read_at?: string | null;
   created_at: string;
 };
 

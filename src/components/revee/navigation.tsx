@@ -37,6 +37,8 @@ export type NotificationItem = {
   detail: string;
   time: string;
   postId?: string;
+  campaignId?: string;
+  goalId?: string;
   createdAt: string;
 };
 
