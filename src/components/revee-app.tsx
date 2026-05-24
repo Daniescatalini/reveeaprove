@@ -74,6 +74,13 @@ type ClientInvite = Pick<Client, "id" | "name" | "avatar" | "agency_id">;
 type MemberInvite = Pick<TeamMember, "id" | "name" | "avatar" | "agency_id" | "role_title">;
 type StatusFilter = "all" | ContentStatus;
 type TypeFilter = "all" | ContentFormat;
+type ResponsibleOption = {
+  key: string;
+  userId: string | null;
+  name: string;
+  role: string;
+};
+
 type CampaignFormInput = {
   client_id: string;
   title: string;
@@ -85,6 +92,7 @@ type CampaignFormInput = {
   start_date: string;
   end_date: string;
   status: CampaignStatus;
+  responsible_user_id: string;
   responsible_name: string;
   copy: string;
   internal_notes: string;
@@ -99,6 +107,7 @@ type MonthlyGoalFormInput = {
   title: string;
   description: string;
   planned_actions: string;
+  responsible_user_id: string;
   responsible_name: string;
   status: MonthlyGoalStatus;
   client_feedback: string;
@@ -534,8 +543,29 @@ function goalMonthKey(goal: MonthlyGoal) {
 
 function getCampaignPeriod(campaign: Campaign) {
   const start = formatDate(campaign.start_date);
-  if (!campaign.end_date) return start;
+  if (!campaign.end_date) return `${start} · sem data definida`;
   return `${start} ate ${formatDate(campaign.end_date)}`;
+}
+
+function parseCurrencyInput(value: string) {
+  const normalized = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function formatCurrencyInput(value: string) {
+  const amount = parseCurrencyInput(value);
+  return amount ? formatCurrency(amount) : "";
+}
+
+function calculateCampaignTotal(startDate: string, endDate: string, dailyBudget: string) {
+  const daily = parseCurrencyInput(dailyBudget);
+  if (!startDate || !endDate || !daily) return "";
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  const diff = Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+  if (!Number.isFinite(diff) || diff <= 0) return "";
+  return formatCurrency(diff * daily);
 }
 
 function defaultStageForStatus(status: ContentStatus): PipelineStage {
@@ -1046,6 +1076,30 @@ export function ReveeApp() {
     () => availableViews.filter((item) => item.id !== "clients" && item.id !== "team"),
     [availableViews]
   );
+  const responsibleOptions = useMemo<ResponsibleOption[]>(() => {
+    const options: ResponsibleOption[] = [];
+    if (profile && profile.role !== "client") {
+      options.push({
+        key: profile.id,
+        userId: profile.id,
+        name: profile.name || agencyName,
+        role: profile.role === "agency" ? "Proprietária" : "Você"
+      });
+    }
+    teamMembers
+      .filter((member) => member.status !== "inactive")
+      .forEach((member) => {
+        const key = member.user_id || `member:${member.id}`;
+        if (options.some((option) => option.key === key || (member.user_id && option.userId === member.user_id))) return;
+        options.push({
+          key,
+          userId: member.user_id ?? null,
+          name: member.name,
+          role: member.role_title || "Colaborador"
+        });
+      });
+    return options;
+  }, [agencyName, profile, teamMembers]);
   const canAccessView = useCallback(
     (nextView: View) => {
       if (nextView === "billing") return isAgencyUser;
@@ -1283,8 +1337,19 @@ export function ReveeApp() {
     const campaignNotices: NotificationItem[] = campaigns.flatMap((campaign) => {
       const clientName = byClient.get(campaign.client_id) ?? "Cliente";
       const updatedAt = campaign.updated_at ?? campaign.created_at;
+      const notices: NotificationItem[] = [];
+      if (!isClientUser && campaign.responsible_user_id && campaign.responsible_user_id === profile?.id) {
+        notices.push({
+          id: `campaign-assigned-${campaign.id}-${campaign.responsible_user_id}`,
+          title: "Você foi definido como responsável",
+          detail: `Campanha: ${campaign.title}`,
+          time: formatTimelineDate(updatedAt),
+          campaignId: campaign.id,
+          createdAt: updatedAt
+        });
+      }
       if (campaign.status === "awaiting_approval" && isClientUser) {
-        return [{
+        return [...notices, {
           id: `campaign-awaiting-${campaign.id}`,
           title: `${agencyName} enviou uma campanha para aprovação`,
           detail: campaign.title,
@@ -1294,7 +1359,7 @@ export function ReveeApp() {
         }];
       }
       if (campaign.status === "approved" && !isClientUser) {
-        return [{
+        return [...notices, {
           id: `campaign-approved-${campaign.id}`,
           title: `${clientName} aprovou a campanha`,
           detail: campaign.title,
@@ -1304,7 +1369,7 @@ export function ReveeApp() {
         }];
       }
       if (campaign.status === "revision_requested" && !isClientUser) {
-        return [{
+        return [...notices, {
           id: `campaign-revision-${campaign.id}`,
           title: `${clientName} solicitou revisão na campanha`,
           detail: campaign.client_feedback || campaign.title,
@@ -1314,7 +1379,7 @@ export function ReveeApp() {
         }];
       }
       if (campaign.status === "active") {
-        return [{
+        return [...notices, {
           id: `campaign-active-${campaign.id}`,
           title: "Campanha marcada como ativa",
           detail: campaign.title,
@@ -1323,14 +1388,25 @@ export function ReveeApp() {
           createdAt: updatedAt
         }];
       }
-      return [];
+      return notices;
     });
 
     const goalNotices: NotificationItem[] = monthlyGoals.flatMap((goal) => {
       const clientName = byClient.get(goal.client_id) ?? "Cliente";
       const updatedAt = goal.updated_at ?? goal.created_at;
+      const notices: NotificationItem[] = [];
+      if (!isClientUser && goal.responsible_user_id && goal.responsible_user_id === profile?.id) {
+        notices.push({
+          id: `goal-assigned-${goal.id}-${goal.responsible_user_id}`,
+          title: "Você foi definido como responsável",
+          detail: `Objetivo do mês: ${goal.title}`,
+          time: formatTimelineDate(updatedAt),
+          goalId: goal.id,
+          createdAt: updatedAt
+        });
+      }
       if (isClientUser && goal.status === "planned") {
-        return [{
+        return [...notices, {
           id: `goal-planned-${goal.id}`,
           title: `${agencyName} adicionou objetivos para o mês`,
           detail: goal.title,
@@ -1340,7 +1416,7 @@ export function ReveeApp() {
         }];
       }
       if (!isClientUser && goal.client_feedback) {
-        return [{
+        return [...notices, {
           id: `goal-feedback-${goal.id}`,
           title: `${clientName} deixou feedback nos objetivos do mês`,
           detail: goal.client_feedback,
@@ -1349,7 +1425,7 @@ export function ReveeApp() {
           createdAt: updatedAt
         }];
       }
-      return [];
+      return notices;
     });
 
     return [...billingNotices, ...goalNotices, ...campaignNotices, ...commentNotices, ...postNotices]
@@ -1773,6 +1849,7 @@ export function ReveeApp() {
       <CampaignFormModal
         open={campaignFormOpen && canCreateContent}
         clients={clients}
+        responsibleOptions={responsibleOptions}
         activeClientId={activeClientId}
         campaign={campaignToEdit}
         onClose={() => {
@@ -1785,6 +1862,7 @@ export function ReveeApp() {
       <MonthlyGoalFormModal
         open={goalFormOpen && canCreateContent}
         clients={clients}
+        responsibleOptions={responsibleOptions}
         activeClientId={activeClientId}
         goal={goalToEdit}
         monthFilter={monthFilter}
@@ -1961,12 +2039,12 @@ export function ReveeApp() {
       objective: input.objective,
       platform: input.platform,
       audience: input.audience,
-      daily_budget: input.daily_budget ? Number(input.daily_budget) : null,
-      total_budget: input.total_budget ? Number(input.total_budget) : null,
+      daily_budget: input.daily_budget ? parseCurrencyInput(input.daily_budget) : null,
+      total_budget: input.total_budget ? parseCurrencyInput(input.total_budget) : null,
       start_date: input.start_date,
       end_date: input.end_date || null,
       status: input.status,
-      responsible_user_id: profile?.id ?? null,
+      responsible_user_id: input.responsible_user_id || null,
       responsible_name: input.responsible_name,
       copy: input.copy,
       internal_notes: input.internal_notes,
@@ -1977,7 +2055,10 @@ export function ReveeApp() {
     if (campaignToEdit) {
       if (supabase) {
         const { error } = await supabase.from("campaigns").update(values).eq("id", campaignToEdit.id);
-        if (error) throw new Error(error.message);
+        if (error) {
+          notify(error.message);
+          throw new Error(error.message);
+        }
       }
       const uploaded = input.files.length ? await uploadCampaignMedia(campaignToEdit.id, input.files) : [];
       if (uploaded.length && supabase) {
@@ -1998,7 +2079,10 @@ export function ReveeApp() {
       let inserted: Omit<Campaign, "media"> | null = null;
       if (supabase) {
         const { data, error } = await supabase.from("campaigns").insert({ ...values, created_at: now }).select().single();
-        if (error || !data) throw new Error(error?.message ?? "Nao foi possivel salvar a campanha.");
+        if (error || !data) {
+          notify(error?.message ?? "Nao foi possivel salvar a campanha.");
+          throw new Error(error?.message ?? "Nao foi possivel salvar a campanha.");
+        }
         inserted = data as Omit<Campaign, "media">;
         campaignId = data.id;
       }
@@ -2050,7 +2134,7 @@ export function ReveeApp() {
       title: input.title,
       description: input.description,
       planned_actions: input.planned_actions,
-      responsible_user_id: profile?.id ?? null,
+      responsible_user_id: input.responsible_user_id || null,
       responsible_name: input.responsible_name,
       status: input.status,
       client_feedback: input.client_feedback,
@@ -2061,7 +2145,10 @@ export function ReveeApp() {
     if (goalToEdit) {
       if (supabase) {
         const { error } = await supabase.from("monthly_goals").update(values).eq("id", goalToEdit.id);
-        if (error) throw new Error(error.message);
+        if (error) {
+          notify(error.message);
+          throw new Error(error.message);
+        }
       }
       const nextGoal = { ...goalToEdit, ...values };
       setMonthlyGoals((current) => current.map((goal) => goal.id === goalToEdit.id ? nextGoal : goal));
@@ -2072,7 +2159,10 @@ export function ReveeApp() {
       let savedGoal: MonthlyGoal = { id: localId, created_at: now, ...values };
       if (supabase) {
         const { data, error } = await supabase.from("monthly_goals").insert({ ...values, created_at: now }).select().single();
-        if (error || !data) throw new Error(error?.message ?? "Nao foi possivel salvar o objetivo.");
+        if (error || !data) {
+          notify(error?.message ?? "Nao foi possivel salvar o objetivo.");
+          throw new Error(error?.message ?? "Nao foi possivel salvar o objetivo.");
+        }
         savedGoal = data as MonthlyGoal;
       }
       setMonthlyGoals((current) => [...current, savedGoal]);
@@ -3128,16 +3218,20 @@ function Field({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   type = "text",
-  inputMode
+  inputMode,
+  readOnly
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   placeholder?: string;
   type?: string;
   inputMode?: "text" | "numeric" | "decimal" | "tel" | "search" | "email" | "url";
+  readOnly?: boolean;
 }) {
   const [showPassword, setShowPassword] = useState(false);
   const isPassword = type === "password";
@@ -3150,10 +3244,13 @@ function Field({
           inputMode={inputMode}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onBlur={onBlur}
           placeholder={placeholder}
+          readOnly={readOnly}
           className={cn(
             "premium-input w-full rounded-xl border border-border-mid bg-white px-3.5 py-3 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15",
-            isPassword && "pr-11"
+            isPassword && "pr-11",
+            readOnly && "bg-[#fbfbfb] text-muted"
           )}
         />
         {isPassword && (
@@ -3388,7 +3485,7 @@ function CalendarView({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <StatCard label="Posts este mês" value={stats.total} hint="total de conteúdos" icon={CalendarDays} onClick={() => onStatusFilter("all")} />
         <StatCard label="Aguardando" value={stats.awaiting} hint="pendentes do cliente" icon={Clock} onClick={() => onStatusFilter("awaiting_approval")} />
         <StatCard label="Campanhas ativas" value={stats.activeCampaigns} hint="no mês filtrado" icon={Megaphone} />
@@ -3414,7 +3511,7 @@ function CalendarView({
         </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <div className="glass-scroll overflow-x-auto">
-            <div className="min-w-[760px] sm:min-w-0">
+            <div className="min-w-[980px] 2xl:min-w-0">
           <div className="grid grid-cols-7 bg-primary text-center text-[10px] font-bold uppercase tracking-0 text-white sm:text-[10px] sm:tracking-[0.12em] sm:text-white/75">
             {[
               ["D", "Dom"],
@@ -3471,17 +3568,17 @@ function CalendarCell({
   onNewPost: () => void;
 }) {
   const { setNodeRef } = useSortable({ id: cell.iso || `empty-${cell.day}`, disabled: !cell.iso });
-  if (cell.muted) return <div className="min-h-[126px] border-b border-r border-line bg-[#f7f7f7]/70 sm:min-h-[158px]" />;
+  if (cell.muted) return <div className="min-h-[168px] border-b border-r border-line bg-[#f7f7f7]/70 xl:min-h-[190px]" />;
   const hasAttention = posts.some((post) => getDueSignal(post)?.tone === "danger");
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "group min-h-[126px] border-b border-r border-line bg-white p-2 transition hover:bg-[#fafafe] sm:min-h-[158px] sm:p-3",
+        "group min-h-[168px] border-b border-r border-line bg-white p-3 transition hover:bg-[#fafafe] xl:min-h-[190px] xl:p-3.5",
         hasAttention && "calendar-cell-attention"
       )}
     >
-      <div className="mb-1 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         {!isClient ? (
           <button
             onClick={onNewPost}
@@ -3504,7 +3601,7 @@ function CalendarCell({
           </button>
         )}
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {campaigns.map((campaign) => <CalendarCampaign key={campaign.id} campaign={campaign} onClick={() => onOpenCampaign(campaign)} />)}
         {posts.map((post) => <CalendarPost key={post.id} post={post} isClient={isClient} onClick={() => onOpenPost(post)} />)}
       </div>
@@ -3517,18 +3614,18 @@ function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: 
   return (
     <button
       onClick={onClick}
-      className="w-full rounded-xl border border-accent/25 bg-accent-light/70 px-3 py-2.5 text-left text-[11px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft sm:px-3.5 sm:py-3 sm:text-xs"
+      className="w-full rounded-xl border border-accent/25 bg-accent-light/70 px-3 py-3 text-left text-[11px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft"
     >
       <span className="mb-1.5 inline-flex rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-accent-dark">
         Campanha
       </span>
       <span className="flex items-start gap-2">
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
-        <span className="min-w-0 flex-1 truncate">{campaign.title}</span>
+        <span className="line-clamp-2 min-w-0 flex-1 leading-4">{campaign.title}</span>
       </span>
-      <span className="mt-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-80">
-        <span>{campaign.platform}</span>
-        <span>{meta.label}</span>
+      <span className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-80">
+        <span className="truncate">{campaign.platform}</span>
+        <span className="rounded-full bg-white/55 px-2 py-0.5 text-[9px]">{meta.label}</span>
       </span>
     </button>
   );
@@ -3546,19 +3643,19 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className="calendar-post-pill group/post w-full rounded-xl px-3 py-2.5 text-left text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft sm:px-3.5 sm:py-3 sm:text-xs"
+      className="calendar-post-pill group/post w-full rounded-xl px-3 py-3 text-left text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft"
     >
       <span className="flex items-start gap-2">
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
-        <span className="min-w-0 flex-1 truncate">{post.title}</span>
+        <span className="line-clamp-2 min-w-0 flex-1 leading-4">{post.title}</span>
       </span>
-      <span className="mt-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-80">
+      <span className="mt-2 grid grid-cols-[auto_1fr] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-80">
         <span>{post.scheduled_time || "--:--"}</span>
-        <span className="rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
+        <span className="justify-self-end rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
       </span>
-      <span className="mt-1 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">
-        <span>{formatBadge.detail}</span>
-        {signal && <span className="text-right">{signal.label}</span>}
+      <span className="mt-1 grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-70">
+        <span className="truncate">{formatBadge.detail}</span>
+        {signal && <span className="max-w-[90px] truncate text-right">{signal.label}</span>}
       </span>
     </button>
   );
@@ -5510,6 +5607,7 @@ function InfoMini({ label, value }: { label: string; value: string }) {
 function CampaignFormModal({
   open,
   clients,
+  responsibleOptions,
   activeClientId,
   campaign,
   onClose,
@@ -5517,6 +5615,7 @@ function CampaignFormModal({
 }: {
   open: boolean;
   clients: Client[];
+  responsibleOptions: ResponsibleOption[];
   activeClientId: string;
   campaign: Campaign | null;
   onClose: () => void;
@@ -5533,6 +5632,7 @@ function CampaignFormModal({
     start_date: new Date().toISOString().slice(0, 10),
     end_date: new Date().toISOString().slice(0, 10),
     status: "creating",
+    responsible_user_id: "",
     responsible_name: "",
     copy: "",
     internal_notes: "",
@@ -5540,20 +5640,24 @@ function CampaignFormModal({
     files: []
   });
   const [saving, setSaving] = useState(false);
+  const [withoutEndDate, setWithoutEndDate] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (!open) return;
+    const hasNoEndDate = Boolean(campaign && !campaign.end_date);
+    setWithoutEndDate(hasNoEndDate);
     setForm({
       client_id: campaign?.client_id ?? activeClientId,
       title: campaign?.title ?? "",
       objective: campaign?.objective ?? "",
       platform: (campaign?.platform as CampaignPlatform) ?? "Meta Ads",
       audience: campaign?.audience ?? "",
-      daily_budget: campaign?.daily_budget ? String(campaign.daily_budget) : "",
-      total_budget: campaign?.total_budget ? String(campaign.total_budget) : "",
+      daily_budget: campaign?.daily_budget ? formatCurrency(campaign.daily_budget) : "",
+      total_budget: campaign?.total_budget ? formatCurrency(campaign.total_budget) : "",
       start_date: campaign?.start_date ?? new Date().toISOString().slice(0, 10),
-      end_date: campaign?.end_date ?? campaign?.start_date ?? new Date().toISOString().slice(0, 10),
+      end_date: hasNoEndDate ? "" : campaign?.end_date ?? campaign?.start_date ?? new Date().toISOString().slice(0, 10),
       status: campaign?.status ?? "creating",
+      responsible_user_id: campaign?.responsible_user_id ?? "",
       responsible_name: campaign?.responsible_name ?? "",
       copy: campaign?.copy ?? "",
       internal_notes: campaign?.internal_notes ?? "",
@@ -5563,6 +5667,31 @@ function CampaignFormModal({
   }, [activeClientId, campaign, open]);
   if (!open) return null;
   const update = <K extends keyof CampaignFormInput>(key: K, value: CampaignFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const updateResponsible = (value: string) => {
+    const option = responsibleOptions.find((item) => item.key === value);
+    setForm((current) => ({
+      ...current,
+      responsible_user_id: option?.userId ?? "",
+      responsible_name: option?.name ?? ""
+    }));
+  };
+  const updateAndRecalculate = <K extends keyof CampaignFormInput>(key: K, value: CampaignFormInput[K]) => {
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      return {
+        ...next,
+        total_budget: withoutEndDate ? "" : calculateCampaignTotal(next.start_date, next.end_date, next.daily_budget)
+      };
+    });
+  };
+  function toggleWithoutEndDate(checked: boolean) {
+    setWithoutEndDate(checked);
+    setForm((current) => ({
+      ...current,
+      end_date: checked ? "" : current.start_date,
+      total_budget: checked ? "" : calculateCampaignTotal(current.start_date, current.start_date, current.daily_budget)
+    }));
+  }
   return (
     <ModalFrame title={campaign ? "Editar campanha" : "Nova campanha"} onClose={onClose}>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -5576,11 +5705,41 @@ function CampaignFormModal({
         <SelectBox label="Status" value={form.status} onChange={(value) => update("status", value as CampaignStatus)}>
           {Object.entries(campaignStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
         </SelectBox>
-        <Field label="Orçamento diário" value={form.daily_budget} onChange={(value) => update("daily_budget", value)} inputMode="decimal" />
-        <Field label="Orçamento total" value={form.total_budget} onChange={(value) => update("total_budget", value)} inputMode="decimal" />
-        <Field label="Data de início" type="date" value={form.start_date} onChange={(value) => update("start_date", value)} />
-        <Field label="Data de fim" type="date" value={form.end_date} onChange={(value) => update("end_date", value)} />
-        <Field label="Responsável" value={form.responsible_name} onChange={(value) => update("responsible_name", value)} />
+        <Field label="Data de início" type="date" value={form.start_date} onChange={(value) => updateAndRecalculate("start_date", value)} />
+        {!withoutEndDate && <Field label="Data de fim" type="date" value={form.end_date} onChange={(value) => updateAndRecalculate("end_date", value)} />}
+        <label className="mb-4 flex items-center gap-3 rounded-xl border border-line bg-[#fbfbfb] px-3.5 py-3 text-sm font-semibold text-primary">
+          <input
+            type="checkbox"
+            checked={withoutEndDate}
+            onChange={(event) => toggleWithoutEndDate(event.target.checked)}
+            className="h-4 w-4 accent-[#7450a8]"
+          />
+          Sem data final definida
+        </label>
+        <Field
+          label="Orçamento diário"
+          value={form.daily_budget}
+          onChange={(value) => updateAndRecalculate("daily_budget", value)}
+          onBlur={() => updateAndRecalculate("daily_budget", formatCurrencyInput(form.daily_budget))}
+          inputMode="decimal"
+          placeholder="R$ 0,00"
+        />
+        <Field
+          label="Orçamento total"
+          value={withoutEndDate ? "Sem data final" : form.total_budget}
+          onChange={() => {}}
+          readOnly
+          placeholder="Calculado automaticamente"
+        />
+        <SelectBox label="Responsável" value={form.responsible_user_id || `name:${form.responsible_name}`} onChange={updateResponsible}>
+          <option value="name:">Selecionar responsável</option>
+          {form.responsible_name && !responsibleOptions.some((item) => item.name === form.responsible_name) && (
+            <option value={`name:${form.responsible_name}`}>{form.responsible_name}</option>
+          )}
+          {responsibleOptions.map((option) => (
+            <option key={option.key} value={option.key}>{option.name} · {option.role}</option>
+          ))}
+        </SelectBox>
       </div>
       <TextAreaBox label="Objetivo da campanha" value={form.objective} onChange={(value) => update("objective", value)} />
       <TextAreaBox label="Público-alvo" value={form.audience} onChange={(value) => update("audience", value)} />
@@ -5591,7 +5750,7 @@ function CampaignFormModal({
       </button>
       <input ref={inputRef} type="file" accept="image/*,video/mp4,video/webm" multiple className="hidden" onChange={(event) => update("files", Array.from(event.target.files ?? []))} />
       {!!form.files.length && <div className="mb-4 flex flex-wrap gap-2">{form.files.map((file) => <span key={file.name} className="rounded-full bg-[#f7f7f7] px-3 py-1 text-xs font-semibold text-muted">{file.name}</span>)}</div>}
-      <button disabled={saving || !form.title || !form.client_id || !form.start_date} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } finally { setSaving(false); } }}>
+      <button disabled={saving || !form.title || !form.client_id || !form.start_date} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar a campanha."); } finally { setSaving(false); } }}>
         {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar campanha
       </button>
     </ModalFrame>
@@ -5601,6 +5760,7 @@ function CampaignFormModal({
 function MonthlyGoalFormModal({
   open,
   clients,
+  responsibleOptions,
   activeClientId,
   goal,
   monthFilter,
@@ -5609,6 +5769,7 @@ function MonthlyGoalFormModal({
 }: {
   open: boolean;
   clients: Client[];
+  responsibleOptions: ResponsibleOption[];
   activeClientId: string;
   goal: MonthlyGoal | null;
   monthFilter: string;
@@ -5623,6 +5784,7 @@ function MonthlyGoalFormModal({
     title: "",
     description: "",
     planned_actions: "",
+    responsible_user_id: "",
     responsible_name: "",
     status: "planned",
     client_feedback: "",
@@ -5639,6 +5801,7 @@ function MonthlyGoalFormModal({
       title: goal?.title ?? "",
       description: goal?.description ?? "",
       planned_actions: goal?.planned_actions ?? "",
+      responsible_user_id: goal?.responsible_user_id ?? "",
       responsible_name: goal?.responsible_name ?? "",
       status: goal?.status ?? "planned",
       client_feedback: goal?.client_feedback ?? "",
@@ -5647,6 +5810,14 @@ function MonthlyGoalFormModal({
   }, [activeClientId, goal, monthFilter, open]);
   if (!open) return null;
   const update = <K extends keyof MonthlyGoalFormInput>(key: K, value: MonthlyGoalFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const updateResponsible = (value: string) => {
+    const option = responsibleOptions.find((item) => item.key === value);
+    setForm((current) => ({
+      ...current,
+      responsible_user_id: option?.userId ?? "",
+      responsible_name: option?.name ?? ""
+    }));
+  };
   return (
     <ModalFrame title={goal ? "Editar objetivo" : "Novo objetivo do mês"} onClose={onClose}>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -5656,7 +5827,15 @@ function MonthlyGoalFormModal({
         </SelectBox>
         <Field label="Mês" type="number" value={String(form.month)} onChange={(value) => update("month", Number(value))} />
         <Field label="Ano" type="number" value={String(form.year)} onChange={(value) => update("year", Number(value))} />
-        <Field label="Responsável" value={form.responsible_name} onChange={(value) => update("responsible_name", value)} />
+        <SelectBox label="Responsável" value={form.responsible_user_id || `name:${form.responsible_name}`} onChange={updateResponsible}>
+          <option value="name:">Selecionar responsável</option>
+          {form.responsible_name && !responsibleOptions.some((item) => item.name === form.responsible_name) && (
+            <option value={`name:${form.responsible_name}`}>{form.responsible_name}</option>
+          )}
+          {responsibleOptions.map((option) => (
+            <option key={option.key} value={option.key}>{option.name} · {option.role}</option>
+          ))}
+        </SelectBox>
         <SelectBox label="Status" value={form.status} onChange={(value) => update("status", value as MonthlyGoalStatus)}>
           {Object.entries(monthlyGoalStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
         </SelectBox>
@@ -5664,7 +5843,7 @@ function MonthlyGoalFormModal({
       <TextAreaBox label="Descrição" value={form.description} onChange={(value) => update("description", value)} />
       <TextAreaBox label="Ações planejadas" value={form.planned_actions} onChange={(value) => update("planned_actions", value)} />
       <TextAreaBox label="Conclusão / resultado" value={form.result_notes} onChange={(value) => update("result_notes", value)} />
-      <button disabled={saving || !form.title || !form.client_id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } finally { setSaving(false); } }}>
+      <button disabled={saving || !form.title || !form.client_id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar o objetivo."); } finally { setSaving(false); } }}>
         {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar objetivo
       </button>
     </ModalFrame>
