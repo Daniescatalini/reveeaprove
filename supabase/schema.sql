@@ -230,8 +230,8 @@ stable
 as $$
   select c.id, c.name, c.avatar, c.agency_id
   from public.clients c
-  where regexp_replace(upper(c.invite_code), '[^A-Z0-9]', '', 'g') = regexp_replace(upper(invite_code_input), '[^A-Z0-9]', '', 'g')
-    and lower(regexp_replace(coalesce(c.email, ''), '\s+', '', 'g')) = lower(regexp_replace(coalesce(email_input, ''), '\s+', '', 'g'))
+  where regexp_replace(upper(coalesce(c.invite_code, '')), '[^A-Z0-9]', '', 'g')
+    = regexp_replace(upper(coalesce(invite_code_input, '')), '[^A-Z0-9]', '', 'g')
   limit 1;
 $$;
 
@@ -312,6 +312,28 @@ as $$
     where u.id = auth.uid()
       and u.role = 'agency'
       and u.agency_id = target_agency_id
+  );
+$$;
+
+create or replace function public.can_manage_agency(target_agency_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role in ('agency', 'member')
+      and u.agency_id = target_agency_id
+  )
+  or exists (
+    select 1
+    from public.agencies a
+    where a.id = target_agency_id
+      and a.owner_id = auth.uid()
   );
 $$;
 
@@ -642,7 +664,10 @@ drop policy if exists "campaigns read scoped" on public.campaigns;
 create policy "campaigns read scoped" on public.campaigns for select using (public.can_access_client(client_id));
 
 drop policy if exists "campaigns agency write" on public.campaigns;
-create policy "campaigns agency write" on public.campaigns for all using (public.is_agency_member(agency_id)) with check (public.is_agency_member(agency_id));
+create policy "campaigns agency write" on public.campaigns for all using (public.can_manage_agency(agency_id)) with check (
+  public.can_manage_agency(agency_id)
+  and exists (select 1 from public.clients c where c.id = campaigns.client_id and c.agency_id = campaigns.agency_id)
+);
 
 drop policy if exists "campaigns client approval update" on public.campaigns;
 create policy "campaigns client approval update" on public.campaigns for update using (public.can_access_client(client_id)) with check (public.can_access_client(client_id));
@@ -663,7 +688,10 @@ drop policy if exists "monthly goals read scoped" on public.monthly_goals;
 create policy "monthly goals read scoped" on public.monthly_goals for select using (public.can_access_client(client_id));
 
 drop policy if exists "monthly goals agency write" on public.monthly_goals;
-create policy "monthly goals agency write" on public.monthly_goals for all using (public.is_agency_member(agency_id)) with check (public.is_agency_member(agency_id));
+create policy "monthly goals agency write" on public.monthly_goals for all using (public.can_manage_agency(agency_id)) with check (
+  public.can_manage_agency(agency_id)
+  and exists (select 1 from public.clients c where c.id = monthly_goals.client_id and c.agency_id = monthly_goals.agency_id)
+);
 
 drop policy if exists "monthly goals client feedback update" on public.monthly_goals;
 create policy "monthly goals client feedback update" on public.monthly_goals for update using (public.can_access_client(client_id)) with check (public.can_access_client(client_id));
@@ -675,7 +703,7 @@ create policy "activity history read scoped" on public.activity_history for sele
 
 drop policy if exists "activity history insert scoped" on public.activity_history;
 create policy "activity history insert scoped" on public.activity_history for insert with check (
-  public.is_agency_member(agency_id) or (client_id is not null and public.can_access_client(client_id))
+  public.can_manage_agency(agency_id) or (client_id is not null and public.can_access_client(client_id))
 );
 
 drop policy if exists "notifications read scoped" on public.notifications;
@@ -685,7 +713,7 @@ create policy "notifications read scoped" on public.notifications for select usi
 
 drop policy if exists "notifications insert scoped" on public.notifications;
 create policy "notifications insert scoped" on public.notifications for insert with check (
-  public.is_agency_member(agency_id) or (client_id is not null and public.can_access_client(client_id))
+  public.can_manage_agency(agency_id) or (client_id is not null and public.can_access_client(client_id))
 );
 
 drop policy if exists "notifications update own read" on public.notifications;

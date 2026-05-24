@@ -663,6 +663,15 @@ function composePostDateTime(date: string, time?: string | null) {
   return `${cleanDate}T${withSeconds}`;
 }
 
+function formatCompactTime(time?: string | null) {
+  if (!time) return "--";
+  const [hour, minute] = time.split(":");
+  if (!hour) return "--";
+  const cleanHour = String(Number(hour)).padStart(2, "0");
+  if (!minute || minute === "00") return `${cleanHour}h`;
+  return `${cleanHour}h${minute}`;
+}
+
 function getDueSignal(post: Post) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -670,8 +679,8 @@ function getDueSignal(post: Post) {
   if (Number.isNaN(due.getTime())) return null;
   const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
   if (["approved", "published"].includes(post.status)) return null;
-  if (diff < 0) return { label: "Post atrasado", tone: "danger" as const };
-  if (diff <= 2) return { label: diff === 0 ? "Prazo hoje" : "Prazo próximo", tone: "near" as const };
+  if (diff < 0) return { label: "Atrasado", tone: "danger" as const };
+  if (diff <= 2) return { label: diff === 0 ? "Hoje" : "Prazo prox.", tone: "near" as const };
   return null;
 }
 
@@ -1205,15 +1214,14 @@ export function ReveeApp() {
   }, [activeClient?.id, campaigns, monthlyGoals, posts]);
 
   const stats = useMemo(() => {
-    const total = scopedPosts.length;
-    const approved = scopedPosts.filter((post) => post.status === "approved").length;
-    const awaiting = scopedPosts.filter((post) => post.status === "awaiting_approval").length;
-    const revision = scopedPosts.filter((post) => post.status === "revision_requested").length;
+    const totalPosts = scopedPosts.length;
+    const totalCampaigns = scopedCampaigns.length;
+    const contentAwaiting = scopedPosts.filter((post) => post.status === "awaiting_approval").length;
+    const contentRevision = scopedPosts.filter((post) => post.status === "revision_requested").length;
     const activeCampaigns = scopedCampaigns.filter((campaign) => campaign.status === "active").length;
     const campaignAwaiting = scopedCampaigns.filter((campaign) => campaign.status === "awaiting_approval").length;
     const campaignRevision = scopedCampaigns.filter((campaign) => campaign.status === "revision_requested").length;
-    const campaignFinished = scopedCampaigns.filter((campaign) => campaign.status === "finished").length;
-    return { total, approved, awaiting, revision, activeCampaigns, campaignAwaiting, campaignRevision, campaignFinished };
+    return { totalPosts, totalCampaigns, contentAwaiting, contentRevision, activeCampaigns, campaignAwaiting, campaignRevision };
   }, [scopedCampaigns, scopedPosts]);
 
   const allNotifications = useMemo<NotificationItem[]>(() => {
@@ -3019,7 +3027,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
           const clientRow = clientInvite as ClientInvite | null;
 
           if (clientErr || !clientRow) {
-            setMessage("Código de convite inválido ou e-mail diferente do cadastrado pela agência.");
+            setMessage("Código de convite inválido. Confira se copiou o código completo enviado pela agência.");
             return;
           }
 
@@ -3047,7 +3055,7 @@ function AuthPanel({ mode, setMode, onLocalAccess }: {
             await supabase.from("users").upsert({
               id: signUpData.user.id,
               name: name || clientRow.name,
-              email,
+              email: normalizeEmail(email),
               role: "client",
               avatar: null,
               agency_id: clientRow.agency_id,
@@ -3442,7 +3450,7 @@ function CalendarView({
 }: {
   posts: Post[];
   campaigns: Campaign[];
-  stats: { total: number; approved: number; awaiting: number; revision: number; activeCampaigns: number; campaignAwaiting: number; campaignRevision: number; campaignFinished: number };
+  stats: { totalPosts: number; totalCampaigns: number; contentAwaiting: number; contentRevision: number; activeCampaigns: number; campaignAwaiting: number; campaignRevision: number };
   monthFilter: string;
   isClient: boolean;
   onOpenPost: (post: Post) => void;
@@ -3485,13 +3493,14 @@ function CalendarView({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <StatCard label="Posts este mês" value={stats.total} hint="total de conteúdos" icon={CalendarDays} onClick={() => onStatusFilter("all")} />
-        <StatCard label="Aguardando" value={stats.awaiting} hint="pendentes do cliente" icon={Clock} onClick={() => onStatusFilter("awaiting_approval")} />
-        <StatCard label="Campanhas ativas" value={stats.activeCampaigns} hint="no mês filtrado" icon={Megaphone} />
-        <StatCard label="Campanhas em aprovação" value={stats.campaignAwaiting} hint="pendentes do cliente" icon={ShieldCheck} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <StatCard label="Posts ao todo" value={stats.totalPosts} hint="conteúdos no mês" icon={CalendarDays} onClick={() => onStatusFilter("all")} />
+        <StatCard label="Campanhas ao todo" value={stats.totalCampaigns} hint="tráfego no mês" icon={Megaphone} />
+        <StatCard label="Conteúdos aguardando aprovação" value={stats.contentAwaiting} hint="pendentes do cliente" icon={Clock} onClick={() => onStatusFilter("awaiting_approval")} />
+        <StatCard label="Campanhas aguardando aprovação" value={stats.campaignAwaiting} hint="pendentes do cliente" icon={ShieldCheck} />
+        <StatCard label="Conteúdos em revisão" value={stats.contentRevision} hint="precisam de ajuste" icon={RefreshCw} onClick={() => onStatusFilter("revision_requested")} />
         <StatCard label="Campanhas em revisão" value={stats.campaignRevision} hint="com feedback do cliente" icon={RefreshCw} />
-        <StatCard label="Campanhas finalizadas" value={stats.campaignFinished} hint="encerradas no filtro" icon={Check} />
+        <StatCard label="Campanhas ativas" value={stats.activeCampaigns} hint="rodando agora" icon={Check} />
       </div>
       <div className="premium-card overflow-hidden rounded-[18px]">
         <div className="flex items-center justify-between border-b border-line px-4 py-3 sm:px-5">
@@ -3623,9 +3632,9 @@ function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: 
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
         <span className="line-clamp-2 min-w-0 flex-1 leading-4">{campaign.title}</span>
       </span>
-      <span className="mt-2 grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-80">
+      <span className="mt-2 grid grid-cols-[1fr_auto] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-80">
         <span className="truncate">{campaign.platform}</span>
-        <span className="rounded-full bg-white/55 px-2 py-0.5 text-[9px]">{meta.label}</span>
+        <span className="max-w-[74px] truncate rounded-full bg-white/55 px-2 py-0.5 text-[9px]">{meta.label}</span>
       </span>
     </button>
   );
@@ -3649,13 +3658,13 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
         <span className="line-clamp-2 min-w-0 flex-1 leading-4">{post.title}</span>
       </span>
-      <span className="mt-2 grid grid-cols-[auto_1fr] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-80">
-        <span>{post.scheduled_time || "--:--"}</span>
-        <span className="justify-self-end rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
+      <span className="mt-2 grid grid-cols-[auto_1fr] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-80">
+        <span>{formatCompactTime(post.scheduled_time)}</span>
+        <span className="max-w-[74px] justify-self-end truncate rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
       </span>
-      <span className="mt-1 grid grid-cols-[1fr_auto] items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.08em] opacity-70">
+      <span className="mt-1 grid grid-cols-[1fr_auto] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-70">
         <span className="truncate">{formatBadge.detail}</span>
-        {signal && <span className="max-w-[90px] truncate text-right">{signal.label}</span>}
+        {signal && <span className="max-w-[64px] truncate text-right">{signal.label}</span>}
       </span>
     </button>
   );
