@@ -875,3 +875,33 @@ grant execute on function public.save_monthly_goal(
   text,
   text
 ) to authenticated;
+
+create or replace function public.delete_monthly_goal(goal_id_input uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_goal public.monthly_goals;
+begin
+  select * into target_goal
+  from public.monthly_goals
+  where id = goal_id_input;
+
+  if target_goal.id is null then
+    raise exception 'Objetivo nao encontrado.';
+  end if;
+
+  if not public.can_manage_agency(target_goal.agency_id) then
+    raise exception 'Sem permissao para excluir objetivo.';
+  end if;
+
+  delete from public.monthly_goals
+  where id = goal_id_input;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.delete_monthly_goal(uuid) to authenticated;

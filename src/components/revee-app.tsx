@@ -1862,6 +1862,7 @@ export function ReveeApp() {
           setCampaignToEdit(null);
         }}
         onSave={saveCampaign}
+        onDelete={deleteCampaign}
       />
 
       <MonthlyGoalFormModal
@@ -1876,6 +1877,7 @@ export function ReveeApp() {
           setGoalToEdit(null);
         }}
         onSave={saveMonthlyGoal}
+        onDelete={deleteMonthlyGoal}
       />
 
       <CampaignModal
@@ -2129,6 +2131,21 @@ export function ReveeApp() {
     notify(status === "revision_requested" ? "Revisao enviada" : "Campanha atualizada");
   }
 
+  async function deleteCampaign(campaign: Campaign) {
+    if (supabase) {
+      const { error } = await supabase.from("campaigns").delete().eq("id", campaign.id);
+      if (error) {
+        notify(error.message);
+        throw new Error(error.message);
+      }
+    }
+    setCampaigns((current) => current.filter((item) => item.id !== campaign.id));
+    setSelectedCampaign((current) => (current?.id === campaign.id ? null : current));
+    setCampaignFormOpen(false);
+    setCampaignToEdit(null);
+    notify("Campanha removida");
+  }
+
   async function saveMonthlyGoal(input: MonthlyGoalFormInput) {
     const now = new Date().toISOString();
     const rpcValues = {
@@ -2221,6 +2238,24 @@ export function ReveeApp() {
     setSelectedGoal(nextGoal);
     await recordActivity({ client_id: goal.client_id, item_type: "monthly_goal", item_id: goal.id, action: "feedback", description: "Cliente deixou feedback nos objetivos do mes." });
     notify("Feedback enviado");
+  }
+
+  async function deleteMonthlyGoal(goal: MonthlyGoal) {
+    if (supabase) {
+      const { error } = await (supabase as any).rpc("delete_monthly_goal", { goal_id_input: goal.id });
+      if (error) {
+        const message = error.message.includes("delete_monthly_goal")
+          ? "Rode o SQL 17 atualizado no Supabase para liberar a exclusão de objetivos."
+          : error.message;
+        notify(message);
+        throw new Error(message);
+      }
+    }
+    setMonthlyGoals((current) => current.filter((item) => item.id !== goal.id));
+    setSelectedGoal((current) => (current?.id === goal.id ? null : current));
+    setGoalFormOpen(false);
+    setGoalToEdit(null);
+    notify("Objetivo removido");
   }
 
   async function createClient(input: Pick<Client, "name" | "instagram_handle" | "phone" | "brand_color" | "email" | "invite_code"> & {
@@ -5638,7 +5673,8 @@ function CampaignFormModal({
   activeClientId,
   campaign,
   onClose,
-  onSave
+  onSave,
+  onDelete
 }: {
   open: boolean;
   clients: Client[];
@@ -5647,6 +5683,7 @@ function CampaignFormModal({
   campaign: Campaign | null;
   onClose: () => void;
   onSave: (input: CampaignFormInput) => Promise<void>;
+  onDelete: (campaign: Campaign) => Promise<void>;
 }) {
   const [form, setForm] = useState<CampaignFormInput>({
     client_id: activeClientId,
@@ -5667,6 +5704,7 @@ function CampaignFormModal({
     files: []
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [withoutEndDate, setWithoutEndDate] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -5777,9 +5815,32 @@ function CampaignFormModal({
       </button>
       <input ref={inputRef} type="file" accept="image/*,video/mp4,video/webm" multiple className="hidden" onChange={(event) => update("files", Array.from(event.target.files ?? []))} />
       {!!form.files.length && <div className="mb-4 flex flex-wrap gap-2">{form.files.map((file) => <span key={file.name} className="rounded-full bg-[#f7f7f7] px-3 py-1 text-xs font-semibold text-muted">{file.name}</span>)}</div>}
-      <button disabled={saving || !form.title || !form.client_id || !form.start_date} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar a campanha."); } finally { setSaving(false); } }}>
-        {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar campanha
-      </button>
+      <div className={cn("grid gap-3", campaign && "sm:grid-cols-[1fr_1.4fr]")}>
+        {campaign && (
+          <button
+            type="button"
+            disabled={saving || deleting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-danger/35 px-4 py-3 text-sm font-semibold text-danger transition hover:bg-danger/5 disabled:opacity-50"
+            onClick={async () => {
+              if (!window.confirm("Tem certeza que deseja excluir esta campanha?")) return;
+              setDeleting(true);
+              try {
+                await onDelete(campaign);
+              } catch (error) {
+                window.alert(error instanceof Error ? error.message : "Nao foi possivel excluir a campanha.");
+              } finally {
+                setDeleting(false);
+              }
+            }}
+          >
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Excluir campanha
+          </button>
+        )}
+        <button disabled={saving || deleting || !form.title || !form.client_id || !form.start_date} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar a campanha."); } finally { setSaving(false); } }}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar campanha
+        </button>
+      </div>
     </ModalFrame>
   );
 }
@@ -5792,7 +5853,8 @@ function MonthlyGoalFormModal({
   goal,
   monthFilter,
   onClose,
-  onSave
+  onSave,
+  onDelete
 }: {
   open: boolean;
   clients: Client[];
@@ -5802,6 +5864,7 @@ function MonthlyGoalFormModal({
   monthFilter: string;
   onClose: () => void;
   onSave: (input: MonthlyGoalFormInput) => Promise<void>;
+  onDelete: (goal: MonthlyGoal) => Promise<void>;
 }) {
   const currentMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
   const [form, setForm] = useState<MonthlyGoalFormInput>({
@@ -5818,6 +5881,7 @@ function MonthlyGoalFormModal({
     result_notes: ""
   });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   useEffect(() => {
     if (!open) return;
     const baseMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
@@ -5870,9 +5934,32 @@ function MonthlyGoalFormModal({
       <TextAreaBox label="Descrição" value={form.description} onChange={(value) => update("description", value)} />
       <TextAreaBox label="Ações planejadas" value={form.planned_actions} onChange={(value) => update("planned_actions", value)} />
       <TextAreaBox label="Conclusão / resultado" value={form.result_notes} onChange={(value) => update("result_notes", value)} />
-      <button disabled={saving || !form.title || !form.client_id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar o objetivo."); } finally { setSaving(false); } }}>
-        {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar objetivo
-      </button>
+      <div className={cn("grid gap-3", goal && "sm:grid-cols-[1fr_1.4fr]")}>
+        {goal && (
+          <button
+            type="button"
+            disabled={saving || deleting}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-danger/35 px-4 py-3 text-sm font-semibold text-danger transition hover:bg-danger/5 disabled:opacity-50"
+            onClick={async () => {
+              if (!window.confirm("Tem certeza que deseja excluir este objetivo?")) return;
+              setDeleting(true);
+              try {
+                await onDelete(goal);
+              } catch (error) {
+                window.alert(error instanceof Error ? error.message : "Nao foi possivel excluir o objetivo.");
+              } finally {
+                setDeleting(false);
+              }
+            }}
+          >
+            {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Excluir objetivo
+          </button>
+        )}
+        <button disabled={saving || deleting || !form.title || !form.client_id} className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" onClick={async () => { setSaving(true); try { await onSave(form); } catch (error) { window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar o objetivo."); } finally { setSaving(false); } }}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />} Salvar objetivo
+        </button>
+      </div>
     </ModalFrame>
   );
 }
