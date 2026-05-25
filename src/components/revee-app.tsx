@@ -2131,6 +2131,21 @@ export function ReveeApp() {
 
   async function saveMonthlyGoal(input: MonthlyGoalFormInput) {
     const now = new Date().toISOString();
+    const rpcValues = {
+      goal_id_input: goalToEdit?.id ?? null,
+      agency_id_input: profile?.agency_id ?? null,
+      client_id_input: input.client_id,
+      month_input: input.month,
+      year_input: input.year,
+      title_input: input.title,
+      description_input: input.description,
+      planned_actions_input: input.planned_actions,
+      responsible_user_id_input: input.responsible_user_id || null,
+      responsible_name_input: input.responsible_name,
+      status_input: input.status,
+      client_feedback_input: input.client_feedback,
+      result_notes_input: input.result_notes
+    };
     const values = {
       agency_id: profile?.agency_id ?? "agency-local",
       client_id: input.client_id,
@@ -2149,10 +2164,23 @@ export function ReveeApp() {
 
     if (goalToEdit) {
       if (supabase) {
-        const { error } = await supabase.from("monthly_goals").update(values).eq("id", goalToEdit.id);
+        const { data, error } = await (supabase as any).rpc("save_monthly_goal", rpcValues);
         if (error) {
-          notify(error.message);
-          throw new Error(error.message);
+          const message = error.message.includes("save_monthly_goal")
+            ? "Rode o SQL 17 no Supabase para liberar o salvamento de objetivos."
+            : error.message;
+          notify(message);
+          throw new Error(message);
+        }
+        if (data) {
+          const nextGoal = data as MonthlyGoal;
+          setMonthlyGoals((current) => current.map((goal) => goal.id === goalToEdit.id ? nextGoal : goal));
+          setSelectedGoal(nextGoal);
+          await recordActivity({ client_id: input.client_id, item_type: "monthly_goal", item_id: goalToEdit.id, action: "updated", description: "Objetivo do mes atualizado." });
+          setGoalFormOpen(false);
+          setGoalToEdit(null);
+          notify("Objetivo salvo");
+          return;
         }
       }
       const nextGoal = { ...goalToEdit, ...values };
@@ -2163,10 +2191,13 @@ export function ReveeApp() {
       const localId = crypto.randomUUID();
       let savedGoal: MonthlyGoal = { id: localId, created_at: now, ...values };
       if (supabase) {
-        const { data, error } = await supabase.from("monthly_goals").insert({ ...values, created_at: now }).select().single();
+        const { data, error } = await (supabase as any).rpc("save_monthly_goal", rpcValues);
         if (error || !data) {
-          notify(error?.message ?? "Nao foi possivel salvar o objetivo.");
-          throw new Error(error?.message ?? "Nao foi possivel salvar o objetivo.");
+          const message = error?.message.includes("save_monthly_goal")
+            ? "Rode o SQL 17 no Supabase para liberar o salvamento de objetivos."
+            : error?.message ?? "Nao foi possivel salvar o objetivo.";
+          notify(message);
+          throw new Error(message);
         }
         savedGoal = data as MonthlyGoal;
       }
