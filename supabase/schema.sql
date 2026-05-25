@@ -688,10 +688,21 @@ drop policy if exists "monthly goals read scoped" on public.monthly_goals;
 create policy "monthly goals read scoped" on public.monthly_goals for select using (public.can_access_client(client_id));
 
 drop policy if exists "monthly goals agency write" on public.monthly_goals;
-create policy "monthly goals agency write" on public.monthly_goals for all using (public.can_manage_agency(agency_id)) with check (
+drop policy if exists "monthly goals agency insert" on public.monthly_goals;
+drop policy if exists "monthly goals agency update" on public.monthly_goals;
+drop policy if exists "monthly goals agency delete" on public.monthly_goals;
+
+create policy "monthly goals agency insert" on public.monthly_goals for insert with check (
   public.can_manage_agency(agency_id)
   and exists (select 1 from public.clients c where c.id = monthly_goals.client_id and c.agency_id = monthly_goals.agency_id)
 );
+
+create policy "monthly goals agency update" on public.monthly_goals for update using (public.can_manage_agency(agency_id)) with check (
+  public.can_manage_agency(agency_id)
+  and exists (select 1 from public.clients c where c.id = monthly_goals.client_id and c.agency_id = monthly_goals.agency_id)
+);
+
+create policy "monthly goals agency delete" on public.monthly_goals for delete using (public.can_manage_agency(agency_id));
 
 drop policy if exists "monthly goals client feedback update" on public.monthly_goals;
 create policy "monthly goals client feedback update" on public.monthly_goals for update using (public.can_access_client(client_id)) with check (public.can_access_client(client_id));

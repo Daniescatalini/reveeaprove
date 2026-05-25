@@ -508,12 +508,9 @@ function getPostTypeLabel(post: Post) {
 
 function getPostFormatBadge(post: Post) {
   const type = getPostType(post);
-  if (type === "carousel") return {
-    label: "Carrossel",
-    detail: post.media.length > 1 ? `${post.media.length} slides` : "Slides"
-  };
-  if (type === "video") return { label: "Vídeo", detail: "Play" };
-  return { label: "Post", detail: "Estático" };
+  if (type === "carousel") return "Carrossel";
+  if (type === "video") return "Reels";
+  return "Estático";
 }
 
 function campaignStage(status: CampaignStatus): PipelineStage {
@@ -3493,13 +3490,12 @@ function CalendarView({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <StatCard label="Posts ao todo" value={stats.totalPosts} hint="conteúdos no mês" icon={CalendarDays} onClick={() => onStatusFilter("all")} />
-        <StatCard label="Campanhas ao todo" value={stats.totalCampaigns} hint="tráfego no mês" icon={Megaphone} />
         <StatCard label="Conteúdos aguardando aprovação" value={stats.contentAwaiting} hint="pendentes do cliente" icon={Clock} onClick={() => onStatusFilter("awaiting_approval")} />
-        <StatCard label="Campanhas aguardando aprovação" value={stats.campaignAwaiting} hint="pendentes do cliente" icon={ShieldCheck} />
         <StatCard label="Conteúdos em revisão" value={stats.contentRevision} hint="precisam de ajuste" icon={RefreshCw} onClick={() => onStatusFilter("revision_requested")} />
-        <StatCard label="Campanhas em revisão" value={stats.campaignRevision} hint="com feedback do cliente" icon={RefreshCw} />
+        <StatCard label="Campanhas ao todo" value={stats.totalCampaigns} hint="tráfego no mês" icon={Megaphone} />
+        <StatCard label="Campanhas aguardando aprovação" value={stats.campaignAwaiting} hint="pendentes do cliente" icon={ShieldCheck} />
         <StatCard label="Campanhas ativas" value={stats.activeCampaigns} hint="rodando agora" icon={Check} />
       </div>
       <div className="premium-card overflow-hidden rounded-[18px]">
@@ -3625,16 +3621,12 @@ function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: 
       onClick={onClick}
       className="w-full rounded-xl border border-accent/25 bg-accent-light/70 px-3 py-3 text-left text-[11px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft"
     >
-      <span className="mb-1.5 inline-flex rounded-full bg-white/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-accent-dark">
-        Campanha
-      </span>
       <span className="flex items-start gap-2">
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
         <span className="line-clamp-2 min-w-0 flex-1 leading-4">{campaign.title}</span>
       </span>
-      <span className="mt-2 grid grid-cols-[1fr_auto] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-80">
-        <span className="truncate">{campaign.platform}</span>
-        <span className="max-w-[74px] truncate rounded-full bg-white/55 px-2 py-0.5 text-[9px]">{meta.label}</span>
+      <span className="mt-2 flex items-center text-[10px] font-semibold uppercase tracking-0 opacity-80">
+        <span className="rounded-full bg-white/55 px-2 py-0.5 text-[9px]">Campanha</span>
       </span>
     </button>
   );
@@ -3643,7 +3635,6 @@ function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: 
 function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boolean; onClick: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: post.id, disabled: isClient });
   const meta = statusMeta[post.status];
-  const signal = getDueSignal(post);
   const formatBadge = getPostFormatBadge(post);
   return (
     <button
@@ -3660,11 +3651,7 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
       </span>
       <span className="mt-2 grid grid-cols-[auto_1fr] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-80">
         <span>{formatCompactTime(post.scheduled_time)}</span>
-        <span className="max-w-[74px] justify-self-end truncate rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge.label}</span>
-      </span>
-      <span className="mt-1 grid grid-cols-[1fr_auto] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-70">
-        <span className="truncate">{formatBadge.detail}</span>
-        {signal && <span className="max-w-[64px] truncate text-right">{signal.label}</span>}
+        <span className="max-w-[82px] justify-self-end truncate rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge}</span>
       </span>
     </button>
   );
@@ -5901,8 +5888,10 @@ function CampaignModal({
   onRevision: (campaign: Campaign, feedback: string) => Promise<void>;
 }) {
   const [feedback, setFeedback] = useState("");
+  const [savingAction, setSavingAction] = useState<"approve" | "revision" | null>(null);
   if (!campaign) return null;
   const meta = campaignStatusMeta[campaign.status];
+  const canClientReviewCampaign = isClient && !["approved", "active", "finished"].includes(campaign.status);
   return (
     <ModalFrame title="Campanha" onClose={onClose}>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -5935,12 +5924,44 @@ function CampaignModal({
       {campaign.copy && <DetailBlock title="Copy da campanha" text={campaign.copy} />}
       {campaign.internal_notes && !isClient && <DetailBlock title="Observações internas" text={campaign.internal_notes} />}
       {campaign.client_feedback && <DetailBlock title="Feedback do cliente" text={campaign.client_feedback} />}
-      {isClient && campaign.status === "awaiting_approval" && (
+      {canClientReviewCampaign && (
         <div className="mt-5 rounded-[16px] border border-line p-4">
           <TextAreaBox label="Feedback para revisão" value={feedback} onChange={setFeedback} />
           <div className="grid gap-2 sm:grid-cols-2">
-            <button className="rounded-lg border border-line px-4 py-3 text-sm font-semibold text-primary hover:bg-accent-light" onClick={() => onRevision(campaign, feedback)}>Solicitar revisão</button>
-            <button className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white" onClick={() => onApprove(campaign)}>Aprovar campanha</button>
+            <button
+              className="rounded-lg border border-line px-4 py-3 text-sm font-semibold text-primary hover:bg-accent-light disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={savingAction !== null}
+              onClick={async () => {
+                if (!feedback.trim()) {
+                  alert("Escreva o que precisa ser ajustado antes de enviar para revisão.");
+                  return;
+                }
+                setSavingAction("revision");
+                try {
+                  await onRevision(campaign, feedback.trim());
+                } finally {
+                  setSavingAction(null);
+                }
+              }}
+            >
+              {savingAction === "revision" ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 inline h-4 w-4" />}
+              Enviar para revisão
+            </button>
+            <button
+              className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={savingAction !== null}
+              onClick={async () => {
+                setSavingAction("approve");
+                try {
+                  await onApprove(campaign);
+                } finally {
+                  setSavingAction(null);
+                }
+              }}
+            >
+              {savingAction === "approve" ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <Check className="mr-2 inline h-4 w-4" />}
+              Aprovar campanha
+            </button>
           </div>
         </div>
       )}
