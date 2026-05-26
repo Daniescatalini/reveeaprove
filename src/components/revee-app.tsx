@@ -588,13 +588,6 @@ function getUploadContentType(file: File) {
   return "application/octet-stream";
 }
 
-function getVideoMimeFromUrl(url: string) {
-  const cleanUrl = url.split("?")[0]?.toLowerCase() ?? "";
-  if (cleanUrl.endsWith(".webm")) return "video/webm";
-  if (cleanUrl.endsWith(".mov")) return "video/quicktime";
-  return "video/mp4";
-}
-
 function isBrowserPlayableVideoFile(file: File) {
   if (!file.type.startsWith("video")) return true;
   if (typeof document === "undefined") return true;
@@ -7009,44 +7002,25 @@ function ConfirmDialog({
 // ─── StatusPill ──────────────────────────────────────────────────────────────
 
 function VideoPlayer({ media, title }: { media: PostMedia; title: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [media.media_url]);
   return (
-    <div className="relative h-full w-full bg-black">
-      {!failed ? (
-        <video
-          key={media.media_url}
-          poster={media.thumbnail_url ?? undefined}
-          controls
-          preload="metadata"
-          playsInline
-          crossOrigin="anonymous"
-          className="h-full w-full object-contain"
-          onLoadedData={() => setFailed(false)}
-          onError={() => setFailed(true)}
-        >
-          <source src={media.media_url} type={getVideoMimeFromUrl(media.media_url)} />
-          <source src={media.media_url} />
-        </video>
-      ) : (
-        <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
-          {media.thumbnail_url && <img src={media.thumbnail_url} alt="" className="max-h-[68%] rounded-xl object-contain opacity-75" />}
-          <div>
-            <div className="text-sm font-semibold">Não foi possível reproduzir este vídeo no navegador.</div>
-            <p className="mt-2 text-xs leading-5 text-white/70">
-              Alguns arquivos, como vídeos em MOV ou codecs de celular, precisam ser enviados em MP4 para tocar direto aqui.
-            </p>
-          </div>
-          <div className="flex flex-wrap justify-center gap-2">
-            <a className="rounded-xl bg-white px-4 py-2 text-xs font-semibold text-primary" href={media.media_url} target="_blank" rel="noreferrer">
-              Abrir vídeo
-            </a>
-            <a className="rounded-xl border border-white/40 px-4 py-2 text-xs font-semibold text-white" href={media.media_url} download={title}>
-              Baixar
-            </a>
-          </div>
-        </div>
-      )}
+    <div className="group relative h-full w-full bg-black">
+      <video
+        key={media.media_url}
+        src={media.media_url}
+        poster={media.thumbnail_url ?? undefined}
+        controls
+        preload="metadata"
+        playsInline
+        className="h-full w-full object-contain"
+      />
+      <div className="pointer-events-none absolute bottom-3 right-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
+        <a className="pointer-events-auto rounded-xl bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-primary shadow-soft" href={media.media_url} target="_blank" rel="noreferrer">
+          Abrir
+        </a>
+        <a className="pointer-events-auto rounded-xl bg-white/15 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur" href={media.media_url} download={title}>
+          Baixar
+        </a>
+      </div>
     </div>
   );
 }
