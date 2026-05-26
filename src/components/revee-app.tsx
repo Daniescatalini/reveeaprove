@@ -660,6 +660,10 @@ function composePostDateTime(date: string, time?: string | null) {
   return `${cleanDate}T${withSeconds}`;
 }
 
+function getLocalDateKey(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 function formatCompactTime(time?: string | null) {
   if (!time) return "--";
   const [hour, minute] = time.split(":");
@@ -2355,10 +2359,17 @@ export function ReveeApp() {
       throw new Error("Limite de conteúdos atingido.");
     }
 
-    const feedOrder = posts.filter((post) => post.client_id === input.client_id).length;
+    const clientFeedPosts = posts.filter((post) => post.client_id === input.client_id);
+    const feedOrder = 0;
     const now = new Date().toISOString();
     if (supabase) {
-      const { data, error } = await supabase.from("posts").insert({
+      const client = supabase;
+      await Promise.all(
+        clientFeedPosts.map((post) =>
+          client.from("posts").update({ feed_order: post.feed_order + 1, updated_at: now }).eq("id", post.id)
+        )
+      );
+      const { data, error } = await client.from("posts").insert({
         client_id: input.client_id,
         title: input.title,
         caption: input.caption,
@@ -2400,7 +2411,11 @@ export function ReveeApp() {
         savedMedia = (mediaRows ?? media) as PostMedia[];
       }
 
-      setPosts((current) => [...current, { ...(data as Omit<Post, "media">), media: savedMedia }]);
+      const nextPost = { ...(data as Omit<Post, "media">), media: savedMedia };
+      setPosts((current) => [
+        ...current.map((post) => post.client_id === input.client_id ? { ...post, feed_order: post.feed_order + 1 } : post),
+        nextPost
+      ]);
     } else {
       const postId = crypto.randomUUID();
       const media = await uploadMedia(postId, input.files, input.cover_file ?? null);
@@ -2423,7 +2438,10 @@ export function ReveeApp() {
         updated_at: now,
         media
       };
-      setPosts((current) => [...current, nextPost]);
+      setPosts((current) => [
+        ...current.map((post) => post.client_id === input.client_id ? { ...post, feed_order: post.feed_order + 1 } : post),
+        nextPost
+      ]);
     }
 
     notify("Conteúdo criado");
@@ -2663,8 +2681,18 @@ export function ReveeApp() {
     setPosts((current) => current.map((post) => ordered.find((item) => item.id === post.id) ?? post));
     if (supabase) {
       const client = supabase;
-      await Promise.all(ordered.map((post) => client.from("posts").update({ feed_order: post.feed_order }).eq("id", post.id)));
+      const { error } = await (client as any).rpc("reorder_feed_posts", {
+        post_ids_input: ordered.map((post) => post.id)
+      });
+      if (error) {
+        const message = error.message.includes("reorder_feed_posts")
+          ? "Rode o SQL 20 no Supabase para salvar a ordem do preview."
+          : error.message;
+        notify(message);
+        throw new Error(message);
+      }
     }
+    notify("Ordem do preview salva");
   }
 
   async function deletePost(postId: string) {
@@ -3641,28 +3669,43 @@ function CalendarCell({
   const { setNodeRef } = useSortable({ id: cell.iso || `empty-${cell.day}`, disabled: !cell.iso });
   if (cell.muted) return <div className="min-h-[168px] border-b border-r border-line bg-[#f7f7f7]/70 xl:min-h-[190px]" />;
   const hasAttention = posts.some((post) => getDueSignal(post)?.tone === "danger");
+  const isToday = cell.iso === getLocalDateKey();
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "group min-h-[168px] border-b border-r border-line bg-white p-3 transition hover:bg-[#fafafe] xl:min-h-[190px] xl:p-3.5",
-        hasAttention && "calendar-cell-attention"
+        "group relative min-h-[168px] border-b border-r border-line bg-white p-3 transition hover:bg-[#fafafe] xl:min-h-[190px] xl:p-3.5",
+        hasAttention && "calendar-cell-attention",
+        isToday && "bg-accent-light/25 ring-1 ring-inset ring-accent/45 shadow-[inset_0_0_0_1px_rgba(166,111,220,0.18)]"
       )}
     >
       <div className="mb-2 flex items-center justify-between">
-        {!isClient ? (
-          <button
-            onClick={onNewPost}
-            className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary hover:bg-accent-light sm:h-7 sm:w-7 sm:text-xs"
-            title="Criar conteúdo nesta data"
-          >
-            {cell.day}
-          </button>
-        ) : (
-          <span className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary sm:h-7 sm:w-7 sm:text-xs">
-            {cell.day}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {!isClient ? (
+            <button
+              onClick={onNewPost}
+              className={cn(
+                "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary hover:bg-accent-light sm:h-7 sm:w-7 sm:text-xs",
+                isToday && "bg-primary text-white shadow-soft hover:bg-primary"
+              )}
+              title="Criar conteúdo nesta data"
+            >
+              {cell.day}
+            </button>
+          ) : (
+            <span className={cn(
+              "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-primary sm:h-7 sm:w-7 sm:text-xs",
+              isToday && "bg-primary text-white shadow-soft"
+            )}>
+              {cell.day}
+            </span>
+          )}
+          {isToday && (
+            <span className="rounded-full bg-white/85 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-accent-dark shadow-soft">
+              Hoje
+            </span>
+          )}
+        </div>
         {!isClient && (
           <button
             onClick={onNewPost}
@@ -4780,6 +4823,26 @@ function PostModal({
   const currentPostId = post.id;
   const orderedEditMedia = editMedia.slice().sort((a, b) => a.order_index - b.order_index);
 
+  useEffect(() => {
+    if (!media.length) return;
+    const preloadIndexes = Array.from(new Set([
+      slide,
+      (slide + 1) % media.length,
+      (slide - 1 + media.length) % media.length
+    ]));
+    preloadIndexes.forEach((index) => {
+      const item = media[index];
+      if (!item) return;
+      if (item.media_type === "image") {
+        const image = new Image();
+        image.src = item.media_url;
+      } else if (item.thumbnail_url) {
+        const image = new Image();
+        image.src = item.thumbnail_url;
+      }
+    });
+  }, [media, slide]);
+
   function moveEditMedia(index: number, direction: -1 | 1) {
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= orderedEditMedia.length) return;
@@ -4880,7 +4943,7 @@ function PostModal({
                 {current
                   ? current.media_type === "video"
                     ? <VideoPlayer key={current.id} media={current} title={post.title} />
-                    : <img key={current.id} src={current.media_url} alt="" className="h-full w-full object-contain" decoding="async" />
+                    : <img key={current.id} src={current.media_url} alt="" className="h-full w-full object-contain" decoding="async" loading="eager" fetchPriority="high" />
                   : <div className="flex h-full items-center justify-center text-muted"><ImagePlus className="h-10 w-10" /></div>}
                 {media.length > 1 && (
                   <>

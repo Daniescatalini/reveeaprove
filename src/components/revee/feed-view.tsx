@@ -39,7 +39,10 @@ export function FeedView({
   generalRequests?: Comment[];
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-  const ordered = posts.slice().sort((a, b) => a.feed_order - b.feed_order);
+  const ordered = posts.slice().sort((a, b) =>
+    a.feed_order - b.feed_order ||
+    new Date(b.scheduled_date || b.created_at).getTime() - new Date(a.scheduled_date || a.created_at).getTime()
+  );
   const handle = toInstagramHandle(client.name, client.instagram_handle);
   const [comment, setComment] = useState("");
 
