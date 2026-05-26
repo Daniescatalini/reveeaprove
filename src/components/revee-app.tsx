@@ -4804,6 +4804,26 @@ function PostModal({
     setEditContentFormat(getPostType(post));
     setEditMedia(post.media.slice().sort((a, b) => a.order_index - b.order_index));
   }, [post]);
+  useEffect(() => {
+    const mediaItems = post?.media ?? [];
+    if (!mediaItems.length) return;
+    const preloadIndexes = Array.from(new Set([
+      slide,
+      (slide + 1) % mediaItems.length,
+      (slide - 1 + mediaItems.length) % mediaItems.length
+    ]));
+    preloadIndexes.forEach((index) => {
+      const item = mediaItems[index];
+      if (!item) return;
+      if (item.media_type === "image") {
+        const image = new Image();
+        image.src = item.media_url;
+      } else if (item.thumbnail_url) {
+        const image = new Image();
+        image.src = item.thumbnail_url;
+      }
+    });
+  }, [post?.media, slide]);
   if (!post) return null;
   const media = post.media.length ? post.media : [];
   const current = media[slide];
@@ -4822,27 +4842,6 @@ function PostModal({
     : comments;
   const currentPostId = post.id;
   const orderedEditMedia = editMedia.slice().sort((a, b) => a.order_index - b.order_index);
-
-  useEffect(() => {
-    if (!media.length) return;
-    const preloadIndexes = Array.from(new Set([
-      slide,
-      (slide + 1) % media.length,
-      (slide - 1 + media.length) % media.length
-    ]));
-    preloadIndexes.forEach((index) => {
-      const item = media[index];
-      if (!item) return;
-      if (item.media_type === "image") {
-        const image = new Image();
-        image.src = item.media_url;
-      } else if (item.thumbnail_url) {
-        const image = new Image();
-        image.src = item.thumbnail_url;
-      }
-    });
-  }, [media, slide]);
-
   function moveEditMedia(index: number, direction: -1 | 1) {
     const nextIndex = index + direction;
     if (nextIndex < 0 || nextIndex >= orderedEditMedia.length) return;
