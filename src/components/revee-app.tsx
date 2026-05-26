@@ -588,6 +588,13 @@ function getUploadContentType(file: File) {
   return "application/octet-stream";
 }
 
+function getVideoMimeFromUrl(url: string) {
+  const cleanUrl = url.split("?")[0]?.toLowerCase() ?? "";
+  if (cleanUrl.endsWith(".webm")) return "video/webm";
+  if (cleanUrl.endsWith(".mov")) return "video/quicktime";
+  return "video/mp4";
+}
+
 function isBrowserPlayableVideoFile(file: File) {
   if (!file.type.startsWith("video")) return true;
   if (typeof document === "undefined") return true;
@@ -3675,8 +3682,7 @@ function CalendarCell({
       ref={setNodeRef}
       className={cn(
         "group relative min-h-[168px] border-b border-r border-line bg-white p-3 transition hover:bg-[#fafafe] xl:min-h-[190px] xl:p-3.5",
-        hasAttention && "calendar-cell-attention",
-        isToday && "bg-accent-light/25 ring-1 ring-inset ring-accent/45 shadow-[inset_0_0_0_1px_rgba(166,111,220,0.18)]"
+        hasAttention && "calendar-cell-attention"
       )}
     >
       <div className="mb-2 flex items-center justify-between">
@@ -3698,11 +3704,6 @@ function CalendarCell({
               isToday && "bg-primary text-white shadow-soft"
             )}>
               {cell.day}
-            </span>
-          )}
-          {isToday && (
-            <span className="rounded-full bg-white/85 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-accent-dark shadow-soft">
-              Hoje
             </span>
           )}
         </div>
@@ -7009,18 +7010,24 @@ function ConfirmDialog({
 
 function VideoPlayer({ media, title }: { media: PostMedia; title: string }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [media.media_url]);
   return (
     <div className="relative h-full w-full bg-black">
       {!failed ? (
         <video
-          src={media.media_url}
+          key={media.media_url}
           poster={media.thumbnail_url ?? undefined}
           controls
-          preload="auto"
+          preload="metadata"
           playsInline
+          crossOrigin="anonymous"
           className="h-full w-full object-contain"
+          onLoadedData={() => setFailed(false)}
           onError={() => setFailed(true)}
-        />
+        >
+          <source src={media.media_url} type={getVideoMimeFromUrl(media.media_url)} />
+          <source src={media.media_url} />
+        </video>
       ) : (
         <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
           {media.thumbnail_url && <img src={media.thumbnail_url} alt="" className="max-h-[68%] rounded-xl object-contain opacity-75" />}
