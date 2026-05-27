@@ -598,19 +598,79 @@ function getUploadContentType(file: File) {
   return "application/octet-stream";
 }
 
-function isBrowserPlayableVideoFile(file: File) {
-  if (!file.type.startsWith("video")) return true;
-  if (typeof document === "undefined") return true;
-  const type = getUploadContentType(file);
-  const video = document.createElement("video");
-  if (video.canPlayType(type)) return true;
-  return /\.(mp4|m4v|webm)$/i.test(file.name);
+function isVideoUpload(file: File) {
+  return file.type.startsWith("video") || /\.(mp4|m4v|mov|webm)$/i.test(file.name);
 }
 
-function warnUnsupportedVideos(files: File[]) {
-  const unsupported = files.filter((file) => file.type.startsWith("video") && !isBrowserPlayableVideoFile(file));
+async function canPreviewVideoFile(file: File) {
+  if (!isVideoUpload(file)) return true;
+  if (typeof document === "undefined") return true;
+  if (/\.(mov)$/i.test(file.name)) return false;
+
+  const type = getUploadContentType(file);
+  const video = document.createElement("video");
+  if (!video.canPlayType(type) && !/\.(mp4|m4v|webm)$/i.test(file.name)) return false;
+
+  const url = URL.createObjectURL(file);
+  video.preload = "auto";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = url;
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timeout = window.setTimeout(() => reject(new Error("Tempo esgotado ao validar vídeo.")), 5000);
+      video.onloadedmetadata = () => {
+        window.clearTimeout(timeout);
+        resolve();
+      };
+      video.onerror = () => {
+        window.clearTimeout(timeout);
+        reject(new Error("Vídeo incompatível."));
+      };
+      video.load();
+    });
+
+    const targetTime = Number.isFinite(video.duration) && video.duration > 0 ? Math.min(0.2, video.duration / 10) : 0;
+    if (targetTime > 0) {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error("Não foi possível ler o quadro do vídeo.")), 5000);
+        video.onseeked = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+        video.onerror = () => {
+          window.clearTimeout(timeout);
+          reject(new Error("Vídeo incompatível."));
+        };
+        video.currentTime = targetTime;
+      });
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, video.videoWidth || 1);
+    canvas.height = Math.max(1, video.videoHeight || 1);
+    const context = canvas.getContext("2d");
+    if (!context || !video.videoWidth || !video.videoHeight) return false;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function warnUnsupportedVideos(files: File[]) {
+  const videos = files.filter(isVideoUpload);
+  if (!videos.length) return false;
+  const checks = await Promise.all(videos.map(async (file) => ({ file, supported: await canPreviewVideoFile(file) })));
+  const unsupported = checks.filter((item) => !item.supported).map((item) => item.file);
   if (!unsupported.length) return false;
-  window.alert(`Este vídeo não toca direto no navegador: ${unsupported.map((file) => file.name).join(", ")}. Exporte/envie em MP4 para reproduzir no computador.`);
+  window.alert(
+    `Este vídeo pode não tocar na prévia do computador: ${unsupported.map((file) => file.name).join(", ")}.\n\n` +
+    "Converta/exporte novamente como MP4 compatível: vídeo H.264, áudio AAC, sem HEVC/H.265 e sem HDR. No CapCut, procure exportar em MP4 compatível antes de enviar."
+  );
   return true;
 }
 
@@ -4853,8 +4913,8 @@ function PostModal({
     setEditMedia(arrayMove(orderedEditMedia, index, nextIndex).map((item, orderIndex) => ({ ...item, order_index: orderIndex })));
   }
 
-  function replaceEditMedia(index: number, file: File) {
-    if (warnUnsupportedVideos([file])) return;
+  async function replaceEditMedia(index: number, file: File) {
+    if (await warnUnsupportedVideos([file])) return;
     const replacement: PostMedia & { sourceFile: File } = {
       id: `local-replace-${crypto.randomUUID()}`,
       post_id: currentPostId,
@@ -4866,9 +4926,9 @@ function PostModal({
     setEditMedia(orderedEditMedia.map((item, itemIndex) => itemIndex === index ? replacement : item));
   }
 
-  function addEditMedia(files: File[]) {
+  async function addEditMedia(files: File[]) {
     if (!files.length) return;
-    if (warnUnsupportedVideos(files)) return;
+    if (await warnUnsupportedVideos(files)) return;
     setEditMedia((current) => [
       ...current,
       ...files.map((file, index) => ({
@@ -5043,9 +5103,10 @@ function PostModal({
                         accept="image/*,video/mp4,video/webm"
                         multiple
                         className="hidden"
-                        onChange={(event) => {
-                          addEditMedia(Array.from(event.target.files ?? []));
-                          event.currentTarget.value = "";
+                        onChange={async (event) => {
+                          const input = event.currentTarget;
+                          await addEditMedia(Array.from(input.files ?? []));
+                          input.value = "";
                         }}
                       />
                     </label>
@@ -5069,10 +5130,11 @@ function PostModal({
                           <button className="rounded-md p-1.5 text-muted hover:bg-accent-light hover:text-primary" onClick={() => moveEditMedia(index, 1)} disabled={index === orderedEditMedia.length - 1} title="Descer slide"><ChevronRight className="h-3.5 w-3.5 rotate-90" /></button>
                           <label className="cursor-pointer rounded-md p-1.5 text-muted hover:bg-accent-light hover:text-primary" title="Substituir slide">
                             <Upload className="h-3.5 w-3.5" />
-                            <input type="file" accept="image/*,video/mp4,video/webm" className="hidden" onChange={(event) => {
-                              const file = event.target.files?.[0];
-                              if (file) replaceEditMedia(index, file);
-                              event.currentTarget.value = "";
+                            <input type="file" accept="image/*,video/mp4,video/webm" className="hidden" onChange={async (event) => {
+                              const input = event.currentTarget;
+                              const file = input.files?.[0];
+                              if (file) await replaceEditMedia(index, file);
+                              input.value = "";
                             }} />
                           </label>
                           <button className="rounded-md p-1.5 text-muted hover:bg-red-light hover:text-danger" onClick={() => setEditMedia(orderedEditMedia.filter((_, itemIndex) => itemIndex !== index).map((media, orderIndex) => ({ ...media, order_index: orderIndex })))} title="Remover slide">
@@ -5556,10 +5618,11 @@ function PostFormModal({
         accept={contentFormat === "video" ? "video/mp4,video/webm" : "image/*,video/mp4,video/webm"}
         multiple
         className="hidden"
-        onChange={(event) => {
-          const selectedFiles = Array.from(event.target.files ?? []);
-          if (warnUnsupportedVideos(selectedFiles)) {
-            event.currentTarget.value = "";
+        onChange={async (event) => {
+          const input = event.currentTarget;
+          const selectedFiles = Array.from(input.files ?? []);
+          if (await warnUnsupportedVideos(selectedFiles)) {
+            input.value = "";
             return;
           }
           setFiles(selectedFiles);
@@ -5880,7 +5943,22 @@ function CampaignFormModal({
       <button type="button" className="mb-3 flex w-full flex-col items-center justify-center gap-2 rounded-[14px] border border-dashed border-accent/60 bg-accent-light/40 px-4 py-7 text-sm font-semibold text-accent-dark" onClick={() => inputRef.current?.click()}>
         <Upload className="h-5 w-5" /> Adicionar criativos
       </button>
-      <input ref={inputRef} type="file" accept="image/*,video/mp4,video/webm" multiple className="hidden" onChange={(event) => update("files", Array.from(event.target.files ?? []))} />
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,video/mp4,video/webm"
+        multiple
+        className="hidden"
+        onChange={async (event) => {
+          const input = event.currentTarget;
+          const selectedFiles = Array.from(input.files ?? []);
+          if (await warnUnsupportedVideos(selectedFiles)) {
+            input.value = "";
+            return;
+          }
+          update("files", selectedFiles);
+        }}
+      />
       {!!form.files.length && <div className="mb-4 flex flex-wrap gap-2">{form.files.map((file) => <span key={file.name} className="rounded-full bg-[#f7f7f7] px-3 py-1 text-xs font-semibold text-muted">{file.name}</span>)}</div>}
       <div className={cn("grid gap-3", campaign && "sm:grid-cols-[1fr_1.4fr]")}>
         {campaign && (
