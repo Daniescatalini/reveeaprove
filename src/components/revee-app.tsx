@@ -131,6 +131,7 @@ const pipelineMeta: Record<PipelineStage, { label: string; description: string }
   waiting_client: { label: "Aguardando cliente", description: "Pendentes de aprovação" },
   revision: { label: "Precisa de alteração", description: "Ajustes solicitados pelo cliente" },
   approved: { label: "Aprovado", description: "Pronto para agendamento" },
+  scheduled: { label: "Programado", description: "Conteúdos com data marcada" },
   published: { label: "Publicado", description: "Conteúdos finalizados" }
 };
 
@@ -141,6 +142,7 @@ const pipelineStyle: Record<PipelineStage, { accent: string; bg: string }> = {
   waiting_client: { accent: "#46658e", bg: "#e8eef7" },
   revision: { accent: "#8a4a63", bg: "#f6e7ee" },
   approved: { accent: "#2f7a5c", bg: "#e5f4ee" },
+  scheduled: { accent: "#46658e", bg: "#e8eef7" },
   published: { accent: "#2f7a5c", bg: "#e5f4ee" }
 };
 
@@ -569,8 +571,16 @@ function defaultStageForStatus(status: ContentStatus): PipelineStage {
   if (status === "awaiting_approval") return "waiting_client";
   if (status === "revision_requested") return "revision";
   if (status === "approved") return "approved";
+  if (status === "scheduled") return "scheduled";
   if (status === "published") return "published";
   return "needs_design";
+}
+
+function stageForPost(post: Post): PipelineStage {
+  if (["awaiting_approval", "revision_requested", "approved", "scheduled", "published"].includes(post.status)) {
+    return defaultStageForStatus(post.status);
+  }
+  return post.pipeline_stage;
 }
 
 function getMediaPreviewUrl(media?: PostMedia | null) {
@@ -2671,6 +2681,7 @@ export function ReveeApp() {
       waiting_client: "awaiting_approval",
       revision: "revision_requested",
       approved: "approved",
+      scheduled: "scheduled",
       published: "published"
     };
     await updatePost(postId, { pipeline_stage: stage, ...(status[stage] ? { status: status[stage] } : {}) });
@@ -3790,7 +3801,7 @@ function PipelineView({
           <PipelineColumn
             key={stage}
             stage={stage}
-            posts={posts.filter((post) => post.pipeline_stage === stage)}
+            posts={posts.filter((post) => stageForPost(post) === stage)}
             campaigns={campaigns.filter((campaign) => campaignStage(campaign.status) === stage)}
             isClient={isClient}
             onOpenPost={onOpenPost}

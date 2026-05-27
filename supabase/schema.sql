@@ -31,6 +31,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 alter type public.pipeline_stage add value if not exists 'revision';
+alter type public.pipeline_stage add value if not exists 'scheduled';
 
 create table if not exists public.agencies (
   id uuid primary key default gen_random_uuid(),

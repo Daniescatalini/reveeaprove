@@ -16,6 +16,7 @@ export type PipelineStage =
   | "waiting_client"
   | "revision"
   | "approved"
+  | "scheduled"
   | "published";
 
 export type MediaType = "image" | "video";
