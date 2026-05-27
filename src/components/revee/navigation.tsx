@@ -389,7 +389,7 @@ export function Topbar({
                 initial={{ opacity: 0, y: 8, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                className="fixed left-4 right-4 top-[72px] z-40 max-h-[70vh] overflow-hidden rounded-2xl border border-line bg-white p-2 text-primary shadow-modal sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[360px] sm:max-w-[calc(100vw-32px)]"
+                className="fixed left-4 right-4 top-[72px] z-[90] max-h-[70vh] overflow-hidden rounded-2xl border border-line bg-white p-2 text-primary shadow-modal sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[360px] sm:max-w-[calc(100vw-32px)]"
               >
                 <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-2">
                   <div>
@@ -519,7 +519,7 @@ export function MobileNav({
     : visibleViews.slice(0, 4);
   return (
     <nav className={cn(
-      "mobile-safe fixed inset-x-0 bottom-0 z-40 grid border-t border-line bg-white px-2 pt-2 shadow-[0_-12px_30px_rgba(23,11,67,0.08)] lg:hidden",
+      "mobile-safe fixed inset-x-0 bottom-0 z-40 grid border-t border-line bg-white px-2 pt-1.5 shadow-[0_-12px_30px_rgba(23,11,67,0.08)] lg:hidden",
       canCreateContent ? "grid-cols-5" : "grid-cols-4"
     )}>
       {navItems.slice(0, 2).map((item) => (
@@ -537,11 +537,11 @@ export function MobileNav({
       ))}
       {canCreateContent && (
         <button
-          className="mx-auto -mt-7 flex h-16 w-16 items-center justify-center rounded-full bg-primary text-white shadow-modal ring-8 ring-white"
+          className="mx-auto -mt-3 flex h-11 w-11 items-center justify-center rounded-full bg-primary text-white shadow-modal ring-[6px] ring-white"
           onClick={onNewPost}
           aria-label="Criar conteúdo"
         >
-          <Plus className="h-7 w-7" />
+          <Plus className="h-5 w-5" />
         </button>
       )}
       {navItems.slice(2, 4).map((item) => (

@@ -1537,10 +1537,26 @@ export function ReveeApp() {
         name: agencyScopedWorkspace.name,
         workspace_settings: agencyScopedWorkspace
       }).eq("id", profile.agency_id).then(({ error }) => {
-        if (error) notify(error.message);
+        if (!error) return;
+        fetch("/api/agency/workspace", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {})
+          },
+          body: JSON.stringify({
+            agencyId: profile.agency_id,
+            workspace: agencyScopedWorkspace
+          })
+        }).then(async (response) => {
+          if (!response.ok) {
+            const data = await response.json().catch(() => null);
+            notify(data?.error ?? error.message);
+          }
+        }).catch(() => notify(error.message));
       });
     }
-  }, [agencyName, profile?.agency_id]);
+  }, [agencyName, profile?.agency_id, session?.access_token]);
 
   async function saveOwnProfile(input: { name: string; avatar_file?: File | null }) {
     if (!profile) return;
@@ -1668,7 +1684,7 @@ export function ReveeApp() {
       data-theme={darkMode ? "dark" : "light"}
       style={{ "--workspace-color": workspace.brandColor } as CSSProperties}
     >
-      <div className="flex min-h-dvh">
+      <div className="flex min-h-[100svh]">
 
         <Sidebar
           profile={profile}
@@ -1703,7 +1719,7 @@ export function ReveeApp() {
           }}
         />
 
-        <main className={cn("flex min-w-0 flex-1 flex-col pb-20 transition-[margin] duration-300 lg:pb-0", sidebarCollapsed ? "lg:ml-[84px]" : "lg:ml-[286px]")}>
+        <main className={cn("flex min-w-0 flex-1 flex-col pb-16 transition-[margin] duration-300 lg:pb-0", sidebarCollapsed ? "lg:ml-[84px]" : "lg:ml-[286px]")}>
           {view === "calendar" && (
             <AgencyHero
               workspace={{ ...workspace, name: agencyName }}
@@ -1741,7 +1757,7 @@ export function ReveeApp() {
             onClearNotifications={clearNotifications}
             onOpenNotification={openNotification}
           />
-          <div className="glass-scroll flex-1 overflow-y-auto p-4 sm:p-5 lg:p-6">
+          <div className="glass-scroll flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 lg:p-6">
             {isAgencyUser && <BillingNotice subscription={subscription} onRegularize={() => void billingPaymentAction("payment_link")} />}
             {isAgencyUser && shouldSuspendAccess(subscription) ? (
               <SubscriptionBlocked
@@ -3527,7 +3543,7 @@ function AgencyHero({
                   initial={{ opacity: 0, y: 8, scale: 0.98 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                  className="fixed left-3 right-3 top-[72px] z-40 max-h-[56vh] overflow-hidden rounded-2xl border border-line bg-white p-2 text-primary shadow-modal sm:left-auto sm:right-5 sm:top-20 sm:w-[360px]"
+                  className="fixed left-3 right-3 top-[72px] z-[90] max-h-[56vh] overflow-hidden rounded-2xl border border-line bg-white p-2 text-primary shadow-modal sm:left-auto sm:right-5 sm:top-20 sm:w-[360px]"
                 >
                   <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-2">
                     <div>
@@ -3680,8 +3696,8 @@ function CalendarView({
           </button>
         </div>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <div className="glass-scroll overflow-x-auto">
-            <div className="min-w-[980px] 2xl:min-w-0">
+          <div className="glass-scroll overflow-x-hidden lg:overflow-x-auto">
+            <div className="min-w-0 lg:min-w-[980px] 2xl:min-w-0">
           <div className="grid grid-cols-7 bg-primary text-center text-[10px] font-bold uppercase tracking-0 text-white sm:text-[10px] sm:tracking-[0.12em] sm:text-white/75">
             {[
               ["D", "Dom"],
@@ -3738,18 +3754,18 @@ function CalendarCell({
   onNewPost: () => void;
 }) {
   const { setNodeRef } = useSortable({ id: cell.iso || `empty-${cell.day}`, disabled: !cell.iso });
-  if (cell.muted) return <div className="min-h-[168px] border-b border-r border-line bg-[#f7f7f7]/70 xl:min-h-[190px]" />;
+  if (cell.muted) return <div className="min-h-[112px] border-b border-r border-line bg-[#f7f7f7]/70 sm:min-h-[150px] xl:min-h-[190px]" />;
   const hasAttention = posts.some((post) => getDueSignal(post)?.tone === "danger");
   const isToday = cell.iso === getLocalDateKey();
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "group relative min-h-[168px] border-b border-r border-line bg-white p-3 transition hover:bg-[#fafafe] xl:min-h-[190px] xl:p-3.5",
+        "group relative min-h-[112px] border-b border-r border-line bg-white p-1.5 transition hover:bg-[#fafafe] sm:min-h-[150px] sm:p-3 xl:min-h-[190px] xl:p-3.5",
         hasAttention && "calendar-cell-attention"
       )}
     >
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between sm:mb-2">
         <div className="flex items-center gap-1.5">
           {!isClient ? (
             <button
@@ -3780,7 +3796,7 @@ function CalendarCell({
           </button>
         )}
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5 sm:space-y-2">
         {campaigns.map((campaign) => <CalendarCampaign key={campaign.id} campaign={campaign} onClick={() => onOpenCampaign(campaign)} />)}
         {posts.map((post) => <CalendarPost key={post.id} post={post} isClient={isClient} onClick={() => onOpenPost(post)} />)}
       </div>
@@ -3793,14 +3809,14 @@ function CalendarCampaign({ campaign, onClick }: { campaign: Campaign; onClick: 
   return (
     <button
       onClick={onClick}
-      className="w-full rounded-xl border border-accent/25 bg-accent-light/70 px-3 py-3 text-left text-[11px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft"
+      className="w-full rounded-lg border border-accent/25 bg-accent-light/70 px-1.5 py-2 text-left text-[9px] font-semibold text-accent-dark shadow-[inset_0_0_0_1px_rgba(255,255,255,0.5)] transition hover:-translate-y-0.5 hover:shadow-soft sm:rounded-xl sm:px-3 sm:py-3 sm:text-[11px]"
     >
       <span className="flex items-start gap-2">
-        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
-        <span className="line-clamp-2 min-w-0 flex-1 leading-4">{campaign.title}</span>
+        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full sm:mt-1.5 sm:h-2 sm:w-2" style={{ background: meta.color }} />
+        <span className="line-clamp-2 min-w-0 flex-1 leading-3 sm:leading-4">{campaign.title}</span>
       </span>
-      <span className="mt-2 flex items-center text-[10px] font-semibold uppercase tracking-0 opacity-80">
-        <span className="rounded-full bg-white/55 px-2 py-0.5 text-[9px]">Campanha</span>
+      <span className="mt-1.5 flex items-center text-[9px] font-semibold uppercase tracking-0 opacity-80 sm:mt-2 sm:text-[10px]">
+        <span className="truncate rounded-full bg-white/55 px-1.5 py-0.5 text-[8px] sm:px-2 sm:text-[9px]">Campanha</span>
       </span>
     </button>
   );
@@ -3817,15 +3833,15 @@ function CalendarPost({ post, isClient, onClick }: { post: Post; isClient: boole
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className="calendar-post-pill group/post w-full rounded-xl px-3 py-3 text-left text-[11px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft"
+      className="calendar-post-pill group/post w-full rounded-lg px-1.5 py-2 text-left text-[9px] font-semibold shadow-[inset_0_0_0_1px_rgba(255,255,255,0.44)] transition hover:-translate-y-0.5 hover:shadow-soft sm:rounded-xl sm:px-3 sm:py-3 sm:text-[11px]"
     >
       <span className="flex items-start gap-2">
-        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: meta.color }} />
-        <span className="line-clamp-2 min-w-0 flex-1 leading-4">{post.title}</span>
+        <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full sm:mt-1.5 sm:h-2 sm:w-2" style={{ background: meta.color }} />
+        <span className="line-clamp-2 min-w-0 flex-1 leading-3 sm:leading-4">{post.title}</span>
       </span>
-      <span className="mt-2 grid grid-cols-[auto_1fr] items-center gap-1.5 text-[10px] font-semibold uppercase tracking-0 opacity-80">
+      <span className="mt-1.5 grid grid-cols-1 items-start gap-1 text-[8px] font-semibold uppercase tracking-0 opacity-80 sm:mt-2 sm:grid-cols-[auto_1fr] sm:items-center sm:gap-1.5 sm:text-[10px]">
         <span>{formatCompactTime(post.scheduled_time)}</span>
-        <span className="max-w-[82px] justify-self-end truncate rounded-full bg-white/45 px-2 py-0.5 text-[9px]">{formatBadge}</span>
+        <span className="max-w-full justify-self-start truncate rounded-full bg-white/45 px-1.5 py-0.5 text-[7px] sm:max-w-[82px] sm:justify-self-end sm:px-2 sm:text-[9px]">{formatBadge}</span>
       </span>
     </button>
   );

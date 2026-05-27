@@ -33,13 +33,18 @@
 html {
   min-height: 100%;
   background: var(--bg);
+  overflow-x: hidden;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100svh;
   overflow-x: hidden;
+  overscroll-behavior-x: none;
   background: var(--bg);
   color: var(--text-primary);
+  touch-action: pan-y pinch-zoom;
 }
 
 button,
