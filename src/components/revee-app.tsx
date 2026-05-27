@@ -7013,17 +7013,60 @@ function ConfirmDialog({
 // ─── StatusPill ──────────────────────────────────────────────────────────────
 
 function VideoPlayer({ media, title }: { media: PostMedia; title: string }) {
+  const [sourceUrl, setSourceUrl] = useState(media.media_url);
+  const [loadingBlob, setLoadingBlob] = useState(false);
+  const loadedRef = useRef(false);
+
+  useEffect(() => {
+    loadedRef.current = false;
+    setSourceUrl(media.media_url);
+    setLoadingBlob(false);
+    let objectUrl = "";
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (loadedRef.current || cancelled || media.media_url.startsWith("blob:")) return;
+      setLoadingBlob(true);
+      try {
+        const response = await fetch(media.media_url, { mode: "cors" });
+        if (!response.ok || cancelled || loadedRef.current) return;
+        const blob = await response.blob();
+        if (cancelled || loadedRef.current) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSourceUrl(objectUrl);
+      } catch {
+        // Keep the direct URL if the fallback download is blocked.
+      } finally {
+        if (!cancelled) setLoadingBlob(false);
+      }
+    }, 1800);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [media.media_url]);
+
   return (
     <div className="group relative h-full w-full bg-black">
       <video
-        key={media.media_url}
-        src={media.media_url}
+        key={sourceUrl}
+        src={sourceUrl}
         poster={media.thumbnail_url ?? undefined}
         controls
-        preload="metadata"
+        preload="auto"
         playsInline
         className="h-full w-full object-contain"
+        onLoadedMetadata={() => {
+          loadedRef.current = true;
+          setLoadingBlob(false);
+        }}
       />
+      {loadingBlob && (
+        <div className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/55 px-3 py-1.5 text-[10px] font-semibold text-white backdrop-blur">
+          Carregando vídeo...
+        </div>
+      )}
       <div className="pointer-events-none absolute bottom-3 right-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
         <a className="pointer-events-auto rounded-xl bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-primary shadow-soft" href={media.media_url} target="_blank" rel="noreferrer">
           Abrir
