@@ -166,7 +166,7 @@ function FeedTile({
         {...attributes}
         {...listeners}
         onClick={onClick}
-        className="group relative aspect-square w-full overflow-hidden bg-[#eeeaf4]"
+        className="group relative aspect-[4/5] w-full overflow-hidden bg-[#eeeaf4]"
       >
         {media ? (
           media.media_type === "video" ? (

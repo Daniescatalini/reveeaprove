@@ -434,6 +434,34 @@ function workspaceFromSettings(settings: unknown, agencyName: string): AgencyWor
   };
 }
 
+type LoadedAgency = {
+  name?: string | null;
+  billing_document?: string | null;
+  workspace_settings?: unknown;
+};
+
+async function loadAgencyProfile(agencyId: string, token?: string | null): Promise<LoadedAgency | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("agencies")
+    .select("name,billing_document,workspace_settings")
+    .eq("id", agencyId)
+    .maybeSingle();
+
+  if (!error && data) return data as LoadedAgency;
+
+  try {
+    const response = await fetch("/api/agency/current", {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    return payload?.agency ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Gera código de convite no formato ABC-XXXXXXXXXXXX ──────────────────────
 function generateInviteCode(name: string) {
   const prefix = name.replace(/\s+/g, "").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase() || "CLT";
@@ -988,23 +1016,25 @@ export function ReveeApp() {
     };
     setProfile(nextProfile);
 
+    const { data: currentAuthSession } = await supabase.auth.getSession();
+    const currentAccessToken = currentAuthSession.session?.access_token ?? null;
     let agencyDisplayName = nextProfile.name;
     if (nextProfile.agency_id) {
-      const { data: agency } = await supabase.from("agencies").select("name,billing_document,workspace_settings").eq("id", nextProfile.agency_id).maybeSingle();
+      const agency = await loadAgencyProfile(nextProfile.agency_id, currentAccessToken);
       agencyDisplayName = agency?.name ?? nextProfile.name;
       setAgencyBillingDocument(agency?.billing_document ? formatCpfCnpj(agency.billing_document) : "");
       let nextWorkspace = workspaceFromSettings(agency?.workspace_settings, agencyDisplayName);
       if (!agency?.workspace_settings) {
         try {
           const localWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
-          if (localWorkspace) nextWorkspace = workspaceFromSettings(JSON.parse(localWorkspace), agencyDisplayName);
+          if (nextProfile.role === "agency" && localWorkspace) nextWorkspace = workspaceFromSettings(JSON.parse(localWorkspace), agencyDisplayName);
         } catch {
           nextWorkspace = workspaceFromSettings(null, agencyDisplayName);
         }
       }
       setWorkspace(nextWorkspace);
       agencyDisplayName = nextWorkspace.name;
-      if (!agency?.workspace_settings && nextWorkspace !== defaultWorkspace) {
+      if (nextProfile.role === "agency" && !agency?.workspace_settings && nextWorkspace !== defaultWorkspace) {
         void supabase.from("agencies").update({ workspace_settings: nextWorkspace }).eq("id", nextProfile.agency_id);
       }
     }
