@@ -383,6 +383,13 @@ using (
     select 1
     from public.users u
     where u.id = auth.uid()
+      and u.role = 'agency'
+      and u.agency_id = agencies.id
+  )
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
       and u.role = 'client'
       and u.agency_id = agencies.id
   )
@@ -396,8 +403,26 @@ with check (owner_id = auth.uid());
 drop policy if exists "agencies update owner" on public.agencies;
 create policy "agencies update owner"
 on public.agencies for update
-using (owner_id = auth.uid())
-with check (owner_id = auth.uid());
+using (
+  owner_id = auth.uid()
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role = 'agency'
+      and u.agency_id = agencies.id
+  )
+)
+with check (
+  owner_id = auth.uid()
+  or exists (
+    select 1
+    from public.users u
+    where u.id = auth.uid()
+      and u.role = 'agency'
+      and u.agency_id = agencies.id
+  )
+);
 
 drop policy if exists "clients read scoped" on public.clients;
 create policy "clients read scoped"
