@@ -1005,6 +1005,25 @@ export function ReveeApp() {
       }
     }
 
+    if (user.role === "client") {
+      const { data: clientAuthSession } = await supabase.auth.getSession();
+      try {
+        const response = await fetch("/api/client/sync-link", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(clientAuthSession.session?.access_token ? { Authorization: `Bearer ${clientAuthSession.session.access_token}` } : {})
+          }
+        });
+        if (response.ok) {
+          const payload = await response.json();
+          if (payload?.profile) user = payload.profile as Profile;
+        }
+      } catch {
+        // If the repair endpoint is unavailable, keep the current client link.
+      }
+    }
+
     const nextProfile: Profile = {
       id: user.id,
       name: user.name,
@@ -2427,6 +2446,14 @@ export function ReveeApp() {
         const savedClient = data as Client;
         setClients((current) => [...current, savedClient]);
         setActiveClientId(savedClient.id);
+        const normalizedEmail = (input.email ?? "").trim().toLowerCase();
+        if (normalizedEmail) {
+          void supabase
+            .from("users")
+            .update({ agency_id: profile.agency_id, client_id: savedClient.id })
+            .eq("role", "client")
+            .ilike("email", normalizedEmail);
+        }
       }
     } else {
       setClients((current) => [...current, nextClient]);
