@@ -337,7 +337,7 @@ export function Topbar({
   onClearNotifications: () => void;
   onOpenNotification: (item: NotificationItem) => void;
 }) {
-  const title = views.find((item) => item.id === view)?.label ?? "Revee Aprove";
+  const title = views.find((item) => item.id === view)?.label ?? "ReveeAprove";
   const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   return (

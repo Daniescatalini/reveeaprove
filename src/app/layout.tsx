@@ -10,7 +10,7 @@ const montserrat = Montserrat({
 });
 
 export const metadata: Metadata = {
-  title: "Revee Aprove",
+  title: "ReveeAprove",
   description: "Plataforma SaaS de aprovação de conteúdo para agências e clientes.",
   icons: {
     icon: "/favicon.jpg",
