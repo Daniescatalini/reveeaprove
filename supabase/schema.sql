@@ -68,6 +68,9 @@ create table if not exists public.users (
   email text not null unique,
   role public.user_role not null default 'agency',
   avatar text,
+  profile_banner text,
+  profile_description text,
+  profile_banner_position numeric default 50,
   agency_id uuid references public.agencies(id) on delete set null,
   client_id uuid references public.clients(id) on delete set null,
   created_at timestamptz not null default now()
@@ -657,11 +660,35 @@ create table if not exists public.monthly_goals (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.monthly_metrics (
+  id uuid primary key default gen_random_uuid(),
+  agency_id uuid not null references public.agencies(id) on delete cascade,
+  client_id uuid not null references public.clients(id) on delete cascade,
+  month integer not null check (month between 1 and 12),
+  year integer not null,
+  instagram_followers integer,
+  instagram_reach integer,
+  instagram_impressions integer,
+  instagram_link_clicks integer,
+  instagram_engagement integer,
+  paid_investment numeric(12,2),
+  paid_reach integer,
+  paid_impressions integer,
+  paid_clicks integer,
+  paid_leads integer,
+  status text not null default 'filling' check (status in ('filling','sent_to_client','reviewed','closed')),
+  client_feedback text,
+  created_by uuid references public.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (client_id, year, month)
+);
+
 create table if not exists public.activity_history (
   id uuid primary key default gen_random_uuid(),
   agency_id uuid not null references public.agencies(id) on delete cascade,
   client_id uuid references public.clients(id) on delete cascade,
-  item_type text not null check (item_type in ('post','campaign','monthly_goal')),
+  item_type text not null check (item_type in ('post','campaign','monthly_goal','monthly_metric')),
   item_id uuid not null,
   action text not null,
   user_id uuid references public.users(id) on delete set null,
@@ -674,7 +701,7 @@ create table if not exists public.notifications (
   agency_id uuid not null references public.agencies(id) on delete cascade,
   client_id uuid references public.clients(id) on delete cascade,
   recipient_user_id uuid references public.users(id) on delete cascade,
-  item_type text not null check (item_type in ('post','campaign','monthly_goal','billing','referral')),
+  item_type text not null check (item_type in ('post','campaign','monthly_goal','monthly_metric','billing','referral')),
   item_id uuid,
   title text not null,
   detail text,
@@ -685,6 +712,7 @@ create table if not exists public.notifications (
 create index if not exists campaigns_agency_client_start_idx on public.campaigns(agency_id, client_id, start_date);
 create index if not exists campaign_media_campaign_id_idx on public.campaign_media(campaign_id);
 create index if not exists monthly_goals_agency_client_month_idx on public.monthly_goals(agency_id, client_id, year, month);
+create index if not exists monthly_metrics_agency_client_month_idx on public.monthly_metrics(agency_id, client_id, year, month);
 create index if not exists activity_history_item_idx on public.activity_history(item_type, item_id, created_at desc);
 create index if not exists activity_history_client_idx on public.activity_history(client_id, created_at desc);
 create index if not exists notifications_recipient_idx on public.notifications(recipient_user_id, created_at desc);
@@ -693,6 +721,7 @@ create index if not exists notifications_item_idx on public.notifications(item_t
 alter table public.campaigns enable row level security;
 alter table public.campaign_media enable row level security;
 alter table public.monthly_goals enable row level security;
+alter table public.monthly_metrics enable row level security;
 alter table public.activity_history enable row level security;
 alter table public.notifications enable row level security;
 
@@ -742,6 +771,61 @@ create policy "monthly goals agency delete" on public.monthly_goals for delete u
 
 drop policy if exists "monthly goals client feedback update" on public.monthly_goals;
 create policy "monthly goals client feedback update" on public.monthly_goals for update using (public.can_access_client(client_id)) with check (public.can_access_client(client_id));
+
+drop policy if exists "monthly metrics read scoped" on public.monthly_metrics;
+create policy "monthly metrics read scoped" on public.monthly_metrics for select using (public.can_access_client(client_id));
+
+drop policy if exists "monthly metrics agency insert" on public.monthly_metrics;
+drop policy if exists "monthly metrics agency update" on public.monthly_metrics;
+drop policy if exists "monthly metrics agency delete" on public.monthly_metrics;
+
+create policy "monthly metrics agency insert" on public.monthly_metrics for insert with check (
+  public.can_manage_agency(agency_id)
+  and exists (select 1 from public.clients c where c.id = monthly_metrics.client_id and c.agency_id = monthly_metrics.agency_id)
+);
+
+create policy "monthly metrics agency update" on public.monthly_metrics for update using (public.can_manage_agency(agency_id)) with check (
+  public.can_manage_agency(agency_id)
+  and exists (select 1 from public.clients c where c.id = monthly_metrics.client_id and c.agency_id = monthly_metrics.agency_id)
+);
+
+create policy "monthly metrics agency delete" on public.monthly_metrics for delete using (public.can_manage_agency(agency_id));
+
+drop policy if exists "monthly metrics client feedback update" on public.monthly_metrics;
+
+create or replace function public.save_monthly_metric_feedback(
+  metric_id_input uuid,
+  feedback_input text
+)
+returns public.monthly_metrics
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_metric public.monthly_metrics;
+begin
+  select * into target_metric
+  from public.monthly_metrics
+  where id = metric_id_input;
+
+  if target_metric.id is null then
+    raise exception 'Relatório de métricas nao encontrado.';
+  end if;
+
+  if not public.can_access_client(target_metric.client_id) then
+    raise exception 'Sem permissao para enviar feedback deste relatório.';
+  end if;
+
+  update public.monthly_metrics
+  set client_feedback = feedback_input,
+      updated_at = now()
+  where id = metric_id_input
+  returning * into target_metric;
+
+  return target_metric;
+end;
+$$;
 
 drop policy if exists "activity history read scoped" on public.activity_history;
 create policy "activity history read scoped" on public.activity_history for select using (

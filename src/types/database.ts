@@ -1,4 +1,4 @@
-import type { ActivityHistory, Campaign, CampaignMedia, ContentFormat, ContentStatus, MediaType, MonthlyGoal, PipelineStage, StoredNotification, TeamMember, UserRole } from "@/types/domain";
+import type { ActivityHistory, Campaign, CampaignMedia, ContentFormat, ContentStatus, MediaType, MonthlyGoal, MonthlyMetric, PipelineStage, StoredNotification, TeamMember, UserRole } from "@/types/domain";
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
@@ -12,6 +12,9 @@ export type Database = {
           email: string;
           role: UserRole;
           avatar: string | null;
+          profile_banner: string | null;
+          profile_description: string | null;
+          profile_banner_position: number | null;
           agency_id: string | null;
           client_id: string | null;
           created_at: string;
@@ -121,6 +124,16 @@ export type Database = {
           title: string;
         };
         Update: Partial<MonthlyGoal>;
+      };
+      monthly_metrics: {
+        Row: MonthlyMetric;
+        Insert: Partial<MonthlyMetric> & {
+          agency_id: string;
+          client_id: string;
+          month: number;
+          year: number;
+        };
+        Update: Partial<MonthlyMetric>;
       };
       activity_history: {
         Row: ActivityHistory;

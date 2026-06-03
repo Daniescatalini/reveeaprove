@@ -20,6 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  BarChart3,
   CalendarDays,
   Bell,
   Check,
@@ -67,7 +68,7 @@ import type { AgencyWorkspace, View, ViewItem } from "@/components/revee/types";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { PLANS, formatCurrency, generateReferralCode, getContentLimit, getEstimatedPriceWithReferralDiscount, getLimit, getPastDueDaysLeft, getPlanLabel, getPlanPrice, getReferralDiscountAmount, getStatusLabel, getTrialDaysLeft, shouldSuspendAccess } from "@/lib/plans";
 import { cn, formatDate, initials, toInstagramHandle } from "@/lib/utils";
-import type { ActivityHistory, BillingCycle, BillingHistory, Campaign, CampaignMedia, CampaignPlatform, CampaignStatus, Client, Comment, ContentFormat, ContentStatus, MonthlyGoal, MonthlyGoalStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
+import type { ActivityHistory, BillingCycle, BillingHistory, Campaign, CampaignMedia, CampaignPlatform, CampaignStatus, Client, Comment, ContentFormat, ContentStatus, MonthlyGoal, MonthlyGoalStatus, MonthlyMetric, MonthlyMetricStatus, PipelineStage, Post, PostMedia, Profile, Referral, Subscription, SubscriptionPlan, TeamMember } from "@/types/domain";
 
 type AuthMode = "login" | "signup" | "forgot" | "reset" | "confirm";
 type ClientInvite = Pick<Client, "id" | "name" | "avatar" | "agency_id">;
@@ -114,6 +115,23 @@ type MonthlyGoalFormInput = {
   result_notes: string;
 };
 
+type MonthlyMetricFormInput = {
+  client_id: string;
+  month: number;
+  year: number;
+  instagram_followers: string;
+  instagram_reach: string;
+  instagram_impressions: string;
+  instagram_link_clicks: string;
+  instagram_engagement: string;
+  paid_investment: string;
+  paid_reach: string;
+  paid_impressions: string;
+  paid_clicks: string;
+  paid_leads: string;
+  status: MonthlyMetricStatus;
+};
+
 const statusMeta: Record<ContentStatus, { label: string; color: string; bg: string }> = {
   draft: { label: "Rascunho", color: "#6f6a86", bg: "#f7f6fa" },
   creating: { label: "Em criação", color: "#7b4aa1", bg: "#f2e9f8" },
@@ -146,6 +164,18 @@ const pipelineStyle: Record<PipelineStage, { accent: string; bg: string }> = {
   published: { accent: "#2f7a5c", bg: "#e5f4ee" }
 };
 
+type PipelineColumnStage = PipelineStage | "campaign_active";
+
+const pipelineColumnMeta: Record<PipelineColumnStage, { label: string; description: string }> = {
+  ...pipelineMeta,
+  campaign_active: { label: "Campanhas ativas", description: "Tráfego rodando agora" }
+};
+
+const pipelineColumnStyle: Record<PipelineColumnStage, { accent: string; bg: string }> = {
+  ...pipelineStyle,
+  campaign_active: { accent: "#7b4aa1", bg: "#f2e9f8" }
+};
+
 const campaignStatusMeta: Record<CampaignStatus, { label: string; color: string; bg: string }> = {
   creating: { label: "Em criação", color: "#7b4aa1", bg: "#f2e9f8" },
   awaiting_approval: { label: "Aguardando aprovação", color: "#7450a8", bg: "#efe8fb" },
@@ -164,6 +194,13 @@ const monthlyGoalStatusMeta: Record<MonthlyGoalStatus, { label: string; color: s
   cancelled: { label: "Cancelado", color: "#8a4a63", bg: "#f6e7ee" }
 };
 
+const monthlyMetricStatusMeta: Record<MonthlyMetricStatus, { label: string; color: string; bg: string }> = {
+  filling: { label: "Em preenchimento", color: "#7450a8", bg: "#efe8fb" },
+  sent_to_client: { label: "Enviado para cliente", color: "#46658e", bg: "#e8eef7" },
+  reviewed: { label: "Revisado", color: "#6f6a86", bg: "#f7f6fa" },
+  closed: { label: "Fechado", color: "#170b43", bg: "#eeeaf6" }
+};
+
 const campaignPlatforms: CampaignPlatform[] = ["Meta Ads", "Google Ads", "TikTok Ads", "Pinterest Ads", "Outra"];
 
 const views: ViewItem[] = [
@@ -173,6 +210,7 @@ const views: ViewItem[] = [
   { id: "contents", label: "Conteúdos", icon: FileText },
   { id: "campaigns", label: "Campanhas", icon: Megaphone },
   { id: "goals", label: "Objetivos", icon: Target },
+  { id: "metrics", label: "Métricas", icon: BarChart3 },
   { id: "clients", label: "Clientes", icon: Users, agencyOnly: true },
   { id: "team", label: "Equipe", icon: UserPlus, agencyOnly: true }
 ];
@@ -330,6 +368,31 @@ const seedMonthlyGoals: MonthlyGoal[] = [
     status: "in_progress",
     client_feedback: null,
     result_notes: "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }
+];
+
+const seedMonthlyMetrics: MonthlyMetric[] = [
+  {
+    id: "metric-local-1",
+    agency_id: "agency-local",
+    client_id: "client-a",
+    month: 5,
+    year: 2026,
+    instagram_followers: 12450,
+    instagram_reach: 48200,
+    instagram_impressions: 89300,
+    instagram_link_clicks: 860,
+    instagram_engagement: 3920,
+    paid_investment: 1800,
+    paid_reach: 64500,
+    paid_impressions: 118000,
+    paid_clicks: 1720,
+    paid_leads: 84,
+    status: "filling",
+    client_feedback: null,
+    created_by: "local-user",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   }
@@ -543,11 +606,12 @@ function getPostFormatBadge(post: Post) {
   return "Estático";
 }
 
-function campaignStage(status: CampaignStatus): PipelineStage {
+function campaignStage(status: CampaignStatus): PipelineColumnStage {
   if (status === "creating") return "needs_design";
   if (status === "awaiting_approval") return "waiting_client";
   if (status === "revision_requested") return "revision";
   if (status === "approved" || status === "paused") return "approved";
+  if (status === "active") return "campaign_active";
   return "published";
 }
 
@@ -568,6 +632,10 @@ function goalMonthKey(goal: MonthlyGoal) {
   return `${goal.year}-${String(goal.month).padStart(2, "0")}`;
 }
 
+function metricMonthKey(metric: MonthlyMetric) {
+  return `${metric.year}-${String(metric.month).padStart(2, "0")}`;
+}
+
 function getCampaignPeriod(campaign: Campaign) {
   const start = formatDate(campaign.start_date);
   if (!campaign.end_date) return `${start} · sem data definida`;
@@ -583,6 +651,29 @@ function parseCurrencyInput(value: string) {
 function formatCurrencyInput(value: string) {
   const amount = parseCurrencyInput(value);
   return amount ? formatCurrency(amount) : "";
+}
+
+function parseMetricNumber(value: string) {
+  const normalized = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function metricValue(value?: number | null) {
+  if (value === null || value === undefined) return "—";
+  return new Intl.NumberFormat("pt-BR").format(value);
+}
+
+function metricCurrency(value?: number | null) {
+  if (value === null || value === undefined) return "—";
+  return formatCurrency(value);
+}
+
+function metricComparison(current?: number | null, previous?: number | null) {
+  if (!current || !previous) return null;
+  const change = ((current - previous) / previous) * 100;
+  if (!Number.isFinite(change)) return null;
+  return `${change > 0 ? "+" : ""}${change.toFixed(1).replace(".", ",")}%`;
 }
 
 function calculateCampaignTotal(startDate: string, endDate: string, dailyBudget: string) {
@@ -853,6 +944,7 @@ export function ReveeApp() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [monthlyGoals, setMonthlyGoals] = useState<MonthlyGoal[]>([]);
+  const [monthlyMetrics, setMonthlyMetrics] = useState<MonthlyMetric[]>([]);
   const [activityHistory, setActivityHistory] = useState<ActivityHistory[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
@@ -870,6 +962,7 @@ export function ReveeApp() {
   const [postFormOpen, setPostFormOpen] = useState(false);
   const [campaignFormOpen, setCampaignFormOpen] = useState(false);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const [metricsFormOpen, setMetricsFormOpen] = useState(false);
   const [campaignToEdit, setCampaignToEdit] = useState<Campaign | null>(null);
   const [goalToEdit, setGoalToEdit] = useState<MonthlyGoal | null>(null);
   const [newPostDate, setNewPostDate] = useState(new Date().toISOString().slice(0, 10));
@@ -960,6 +1053,9 @@ export function ReveeApp() {
           email: authData.user.email ?? "",
           role: authData.user.user_metadata?.role ?? "agency",
           avatar: null,
+          profile_banner: null,
+          profile_description: null,
+          profile_banner_position: 50,
           agency_id: authData.user.user_metadata?.agency_id ?? null,
           client_id: authData.user.user_metadata?.client_id ?? null
         };
@@ -1030,6 +1126,9 @@ export function ReveeApp() {
       email: user.email,
       role: user.role,
       avatar: user.avatar,
+      profile_banner: user.profile_banner,
+      profile_description: user.profile_description,
+      profile_banner_position: user.profile_banner_position,
       agency_id: user.agency_id,
       client_id: user.client_id
     };
@@ -1115,6 +1214,14 @@ export function ReveeApp() {
         .order("month", { ascending: false });
       setMonthlyGoals((goalRows ?? []) as MonthlyGoal[]);
 
+      const { data: metricRows } = await supabase
+        .from("monthly_metrics")
+        .select("*")
+        .in("client_id", clientIds)
+        .order("year", { ascending: false })
+        .order("month", { ascending: false });
+      setMonthlyMetrics((metricRows ?? []) as MonthlyMetric[]);
+
       const { data: historyRows } = await supabase
         .from("activity_history")
         .select("*")
@@ -1127,6 +1234,7 @@ export function ReveeApp() {
       setComments([]);
       setCampaigns([]);
       setMonthlyGoals([]);
+      setMonthlyMetrics([]);
       setActivityHistory([]);
     }
 
@@ -1252,6 +1360,12 @@ export function ReveeApp() {
   }
 
   function openNotification(item: NotificationItem) {
+    if (item.metricId || item.monthKey) {
+      if (item.clientId) setActiveClientId(item.clientId);
+      if (item.monthKey) setMonthFilter(item.monthKey);
+      setView("metrics");
+      return;
+    }
     if (item.campaignId) {
       const target = campaigns.find((campaign) => campaign.id === item.campaignId);
       if (!target) return;
@@ -1321,6 +1435,22 @@ export function ReveeApp() {
       .sort((a, b) => goalMonthKey(b).localeCompare(goalMonthKey(a)));
   }, [activeClient?.id, monthFilter, monthlyGoals, query]);
 
+  const scopedMetrics = useMemo(() => {
+    return monthlyMetrics
+      .filter((metric) => metric.client_id === activeClient?.id)
+      .filter((metric) => monthFilter === "all" || metricMonthKey(metric) === monthFilter)
+      .sort((a, b) => metricMonthKey(b).localeCompare(metricMonthKey(a)));
+  }, [activeClient?.id, monthFilter, monthlyMetrics]);
+
+  const currentMetric = scopedMetrics[0] ?? null;
+  const previousMetric = useMemo(() => {
+    if (!activeClient?.id || monthFilter === "all") return null;
+    const [year, month] = monthFilter.split("-").map(Number);
+    const previousDate = new Date(year, month - 2, 1);
+    const previousKey = `${previousDate.getFullYear()}-${String(previousDate.getMonth() + 1).padStart(2, "0")}`;
+    return monthlyMetrics.find((metric) => metric.client_id === activeClient.id && metricMonthKey(metric) === previousKey) ?? null;
+  }, [activeClient?.id, monthFilter, monthlyMetrics]);
+
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
     posts.filter((post) => post.client_id === activeClient?.id).forEach((post) => months.add(post.scheduled_date.slice(0, 7)));
@@ -1329,9 +1459,10 @@ export function ReveeApp() {
       if (campaign.end_date) months.add(campaign.end_date.slice(0, 7));
     });
     monthlyGoals.filter((goal) => goal.client_id === activeClient?.id).forEach((goal) => months.add(goalMonthKey(goal)));
+    monthlyMetrics.filter((metric) => metric.client_id === activeClient?.id).forEach((metric) => months.add(metricMonthKey(metric)));
     months.add(new Date().toISOString().slice(0, 7));
     return Array.from(months).sort();
-  }, [activeClient?.id, campaigns, monthlyGoals, posts]);
+  }, [activeClient?.id, campaigns, monthlyGoals, monthlyMetrics, posts]);
 
   const stats = useMemo(() => {
     const totalPosts = scopedPosts.length;
@@ -1556,10 +1687,65 @@ export function ReveeApp() {
       return notices;
     });
 
-    return [...billingNotices, ...goalNotices, ...campaignNotices, ...commentNotices, ...postNotices]
+    const metricNotices: NotificationItem[] = monthlyMetrics.flatMap((metric) => {
+      const clientName = byClient.get(metric.client_id) ?? "Cliente";
+      const updatedAt = metric.updated_at ?? metric.created_at;
+      const metricMonth = `${months[metric.month - 1]} ${metric.year}`;
+      const notices: NotificationItem[] = [];
+      if (isClientUser && metric.status === "sent_to_client") {
+        notices.push({
+          id: `metric-sent-${metric.id}`,
+          title: `${agencyName} enviou as métricas de ${metricMonth}`,
+          detail: "Relatório mensal disponível para visualizar.",
+          time: formatTimelineDate(updatedAt),
+          metricId: metric.id,
+          clientId: metric.client_id,
+          monthKey: metricMonthKey(metric),
+          createdAt: updatedAt
+        });
+      } else if (isClientUser && metric.updated_at && metric.updated_at !== metric.created_at) {
+        notices.push({
+          id: `metric-updated-${metric.id}-${metric.updated_at}`,
+          title: `${agencyName} atualizou o relatório de métricas`,
+          detail: metricMonth,
+          time: formatTimelineDate(updatedAt),
+          metricId: metric.id,
+          clientId: metric.client_id,
+          monthKey: metricMonthKey(metric),
+          createdAt: updatedAt
+        });
+      }
+      if (!isClientUser && metric.client_feedback) {
+        notices.push({
+          id: `metric-feedback-${metric.id}-${metric.updated_at ?? ""}`,
+          title: `${clientName} deixou feedback no relatório de métricas`,
+          detail: metric.client_feedback,
+          time: formatTimelineDate(updatedAt),
+          metricId: metric.id,
+          clientId: metric.client_id,
+          monthKey: metricMonthKey(metric),
+          createdAt: updatedAt
+        });
+      }
+      if (!isClientUser && metric.status === "reviewed") {
+        notices.push({
+          id: `metric-reviewed-${metric.id}`,
+          title: `${clientName} revisou as métricas`,
+          detail: metricMonth,
+          time: formatTimelineDate(updatedAt),
+          metricId: metric.id,
+          clientId: metric.client_id,
+          monthKey: metricMonthKey(metric),
+          createdAt: updatedAt
+        });
+      }
+      return notices;
+    });
+
+    return [...billingNotices, ...metricNotices, ...goalNotices, ...campaignNotices, ...commentNotices, ...postNotices]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .slice(0, 16);
-  }, [agencyName, billingHistory, campaigns, clients, comments, isAgencyUser, isClientUser, monthlyGoals, posts, profile?.id, profile?.name, referrals, subscription]);
+  }, [agencyName, billingHistory, campaigns, clients, comments, isAgencyUser, isClientUser, monthlyGoals, monthlyMetrics, posts, profile?.id, profile?.name, referrals, subscription]);
 
   const notifications = useMemo(
     () => allNotifications.filter((item) => !dismissedNotificationIds.includes(item.id)),
@@ -1607,12 +1793,16 @@ export function ReveeApp() {
     }
   }, [agencyName, profile?.agency_id, session?.access_token]);
 
-  async function saveOwnProfile(input: { name: string; avatar_file?: File | null }) {
+  async function saveOwnProfile(input: { name: string; avatar_file?: File | null; banner_file?: File | null; profile_description?: string; profile_banner_position?: number | null }) {
     if (!profile) return;
     const avatar = input.avatar_file ? await uploadProfileImage(input.avatar_file, "profiles") : undefined;
+    const banner = input.banner_file ? await uploadProfileImage(input.banner_file, "profiles") : undefined;
     const patch: Partial<Profile> = {
       name: input.name,
-      ...(avatar ? { avatar } : {})
+      ...(avatar ? { avatar } : {}),
+      ...(banner ? { profile_banner: banner } : {}),
+      ...(input.profile_description !== undefined ? { profile_description: input.profile_description } : {}),
+      ...(input.profile_banner_position !== undefined ? { profile_banner_position: input.profile_banner_position } : {})
     };
 
     if (supabase) {
@@ -1683,6 +1873,7 @@ export function ReveeApp() {
           setPosts(seedPosts);
           setCampaigns(seedCampaigns);
           setMonthlyGoals(seedMonthlyGoals);
+          setMonthlyMetrics(seedMonthlyMetrics);
           setActivityHistory(seedActivityHistory);
           setTeamMembers(seedTeamMembers);
           setSubscription(createLocalSubscription("agency-local", "Revee Studio"));
@@ -1726,6 +1917,18 @@ export function ReveeApp() {
       />
     );
   }
+
+  const heroWorkspace: AgencyWorkspace = profile?.role === "member" ? {
+    ...workspace,
+    name: profile.name || agencyName,
+    description: profile.profile_description || workspace.description,
+    avatar: profile.avatar || workspace.avatar,
+    banner: profile.profile_banner || workspace.banner,
+    bannerPosition: profile.profile_banner_position ?? workspace.bannerPosition
+  } : {
+    ...workspace,
+    name: agencyName
+  };
 
   return (
     <div
@@ -1771,7 +1974,7 @@ export function ReveeApp() {
         <main className={cn("flex min-w-0 flex-1 flex-col pb-16 transition-[margin] duration-300 lg:pb-0", sidebarCollapsed ? "lg:ml-[84px]" : "lg:ml-[286px]")}>
           {view === "calendar" && (
             <AgencyHero
-              workspace={{ ...workspace, name: agencyName }}
+              workspace={heroWorkspace}
               isClient={isClientUser}
               profileRole={profile!.role}
               notifications={notifications}
@@ -1900,6 +2103,26 @@ export function ReveeApp() {
                       }}
                     />
                   )}
+                  {view === "metrics" && (
+                    <MetricsView
+                      metric={currentMetric}
+                      previousMetric={previousMetric}
+                      metrics={monthlyMetrics.filter((metricItem) => metricItem.client_id === activeClient?.id)}
+                      activityHistory={activityHistory.filter((item) => item.item_type === "monthly_metric" && item.client_id === activeClient?.id)}
+                      clients={clients}
+                      activeClient={activeClient}
+                      activeClientId={activeClientId}
+                      setActiveClientId={setActiveClientId}
+                      monthFilter={monthFilter}
+                      setMonthFilter={setMonthFilter}
+                      availableMonths={availableMonths}
+                      agencyName={agencyName}
+                      canEdit={canCreateContent}
+                      isClient={isClientUser}
+                      onEdit={() => setMetricsFormOpen(true)}
+                      onFeedback={saveMetricFeedback}
+                    />
+                  )}
                   {view === "clients" && isAgencyUser && (
                     <ClientsView
                       clients={clients}
@@ -2017,6 +2240,16 @@ export function ReveeApp() {
         }}
         onSave={saveMonthlyGoal}
         onDelete={deleteMonthlyGoal}
+      />
+
+      <MetricsFormModal
+        open={metricsFormOpen && canCreateContent}
+        clients={clients}
+        activeClientId={activeClientId}
+        metric={currentMetric}
+        monthFilter={monthFilter}
+        onClose={() => setMetricsFormOpen(false)}
+        onSave={saveMonthlyMetrics}
       />
 
       <CampaignModal
@@ -2283,6 +2516,91 @@ export function ReveeApp() {
     setCampaignFormOpen(false);
     setCampaignToEdit(null);
     notify("Campanha removida");
+  }
+
+  async function saveMonthlyMetrics(input: MonthlyMetricFormInput) {
+    const now = new Date().toISOString();
+    const existing = monthlyMetrics.find((metric) => metric.client_id === input.client_id && metric.month === input.month && metric.year === input.year);
+    const values = {
+      agency_id: profile?.agency_id ?? "agency-local",
+      client_id: input.client_id,
+      month: input.month,
+      year: input.year,
+      instagram_followers: parseMetricNumber(input.instagram_followers) || null,
+      instagram_reach: parseMetricNumber(input.instagram_reach) || null,
+      instagram_impressions: parseMetricNumber(input.instagram_impressions) || null,
+      instagram_link_clicks: parseMetricNumber(input.instagram_link_clicks) || null,
+      instagram_engagement: parseMetricNumber(input.instagram_engagement) || null,
+      paid_investment: parseCurrencyInput(input.paid_investment) || null,
+      paid_reach: parseMetricNumber(input.paid_reach) || null,
+      paid_impressions: parseMetricNumber(input.paid_impressions) || null,
+      paid_clicks: parseMetricNumber(input.paid_clicks) || null,
+      paid_leads: parseMetricNumber(input.paid_leads) || null,
+      status: input.status,
+      created_by: existing?.created_by ?? profile?.id ?? null,
+      updated_at: now
+    };
+    let saved: MonthlyMetric;
+
+    if (supabase) {
+      const query = existing
+        ? supabase.from("monthly_metrics").update(values).eq("id", existing.id).select().single()
+        : supabase.from("monthly_metrics").insert({ ...values, created_at: now }).select().single();
+      const { data, error } = await query;
+      if (error || !data) {
+        notify(error?.message ?? "Nao foi possivel salvar as metricas.");
+        throw new Error(error?.message ?? "Nao foi possivel salvar as metricas.");
+      }
+      saved = data as MonthlyMetric;
+    } else {
+      saved = {
+        id: existing?.id ?? crypto.randomUUID(),
+        created_at: existing?.created_at ?? now,
+        ...values
+      };
+    }
+
+    setMonthlyMetrics((current) => {
+      const withoutCurrent = current.filter((metric) => metric.id !== saved.id && !(metric.client_id === saved.client_id && metric.month === saved.month && metric.year === saved.year));
+      return [...withoutCurrent, saved].sort((a, b) => metricMonthKey(b).localeCompare(metricMonthKey(a)));
+    });
+    await recordActivity({
+      client_id: saved.client_id,
+      item_type: "monthly_metric",
+      item_id: saved.id,
+      action: existing ? (input.status === "sent_to_client" ? "sent_to_client" : "updated") : "created",
+      description: existing
+        ? input.status === "sent_to_client" ? "Relatório de métricas enviado para o cliente." : "Relatório de métricas atualizado."
+        : "Relatório de métricas criado."
+    });
+    setMetricsFormOpen(false);
+    notify("Métricas salvas");
+  }
+
+  async function saveMetricFeedback(metric: MonthlyMetric, feedback: string) {
+    const patch: Partial<MonthlyMetric> = {
+      client_feedback: feedback,
+      updated_at: new Date().toISOString()
+    };
+    if (supabase) {
+      const { error } = await (supabase as any).rpc("save_monthly_metric_feedback", {
+        metric_id_input: metric.id,
+        feedback_input: feedback
+      });
+      if (error) {
+        notify(error.message);
+        throw new Error(error.message);
+      }
+    }
+    setMonthlyMetrics((current) => current.map((item) => item.id === metric.id ? { ...item, ...patch } : item));
+    await recordActivity({
+      client_id: metric.client_id,
+      item_type: "monthly_metric",
+      item_id: metric.id,
+      action: "feedback",
+      description: "Cliente deixou feedback no relatório de métricas."
+    });
+    notify("Feedback salvo");
   }
 
   async function saveMonthlyGoal(input: MonthlyGoalFormInput) {
@@ -3927,14 +4245,15 @@ function PipelineView({
     const stage = event.over?.id as PipelineStage | undefined;
     if (!isClient && stage && pipelineMeta[stage]) onMove(postId, stage);
   }
+  const stages = Object.keys(pipelineColumnMeta) as PipelineColumnStage[];
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="grid gap-4 xl:grid-cols-3 2xl:grid-cols-6">
-        {(Object.keys(pipelineMeta) as PipelineStage[]).map((stage) => (
+        {stages.map((stage) => (
           <PipelineColumn
             key={stage}
             stage={stage}
-            posts={posts.filter((post) => stageForPost(post) === stage)}
+            posts={"campaign_active" === stage ? [] : posts.filter((post) => stageForPost(post) === stage)}
             campaigns={campaigns.filter((campaign) => campaignStage(campaign.status) === stage)}
             isClient={isClient}
             onOpenPost={onOpenPost}
@@ -3954,7 +4273,7 @@ function PipelineColumn({
   onOpenPost,
   onOpenCampaign
 }: {
-  stage: PipelineStage;
+  stage: PipelineColumnStage;
   posts: Post[];
   campaigns: Campaign[];
   isClient: boolean;
@@ -3962,20 +4281,20 @@ function PipelineColumn({
   onOpenCampaign: (campaign: Campaign) => void;
 }) {
   const { setNodeRef } = useSortable({ id: stage });
-  const style = pipelineStyle[stage];
+  const style = pipelineColumnStyle[stage];
   return (
     <div ref={setNodeRef} className="premium-card min-h-[340px] rounded-[18px] p-3">
       <div className="mb-3">
         <div className="flex items-center justify-between">
           <div className="flex min-w-0 items-center gap-2">
             <span className="h-2 w-2 rounded-full" style={{ background: style.accent }} />
-            <h3 className="truncate text-sm font-semibold">{pipelineMeta[stage].label}</h3>
+            <h3 className="truncate text-sm font-semibold">{pipelineColumnMeta[stage].label}</h3>
           </div>
           <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: style.bg, color: style.accent }}>
             {posts.length + campaigns.length}
           </span>
         </div>
-        <p className="mt-1 text-xs text-muted">{pipelineMeta[stage].description}</p>
+        <p className="mt-1 text-xs text-muted">{pipelineColumnMeta[stage].description}</p>
       </div>
       <SortableContext items={posts.map((post) => post.id)} strategy={verticalListSortingStrategy}>
         <div className="space-y-2.5">
@@ -4682,30 +5001,98 @@ function MemberProfileModal({
   open: boolean;
   profile: Profile | null;
   onClose: () => void;
-  onSave: (input: { name: string; avatar_file?: File | null }) => Promise<void>;
+  onSave: (input: { name: string; avatar_file?: File | null; banner_file?: File | null; profile_description?: string; profile_banner_position?: number | null }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState("");
+  const [description, setDescription] = useState("");
+  const [bannerPosition, setBannerPosition] = useState(50);
   const [saving, setSaving] = useState(false);
+  const bannerInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setName(profile?.name ?? "");
     setAvatarFile(null);
+    setBannerFile(null);
+    setBannerPreview("");
+    setDescription(profile?.profile_description ?? "");
+    setBannerPosition(profile?.profile_banner_position ?? 50);
   }, [open, profile]);
+
+  useEffect(() => {
+    if (!bannerFile) return;
+    const url = URL.createObjectURL(bannerFile);
+    setBannerPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [bannerFile]);
 
   if (!open || !profile) return null;
 
   const roleLabel = profile.role === "member" ? "Membro da equipe" : "Cliente";
+  const isMember = profile.role === "member";
+  const bannerUrl = bannerPreview || profile.profile_banner || "/default-agency-cover.png";
 
   return (
     <ModalFrame title="Meu perfil" onClose={onClose} compact>
+      {isMember && (
+        <div className="mb-5 overflow-hidden rounded-2xl border border-line bg-[#fbfbfb]">
+          <div className="relative h-32">
+            <img
+              src={bannerUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              style={{ objectPosition: `center ${bannerPosition}%` }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-primary/70 via-primary/20 to-black/10" />
+            <button
+              type="button"
+              className="absolute bottom-3 right-3 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-primary shadow-soft"
+              onClick={() => bannerInputRef.current?.click()}
+            >
+              Alterar capa
+            </button>
+            <input
+              ref={bannerInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(event) => setBannerFile(event.target.files?.[0] ?? null)}
+            />
+          </div>
+          <div className="px-3 py-3">
+            <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Reposicionar capa</label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={bannerPosition}
+              onChange={(event) => setBannerPosition(Number(event.target.value))}
+              className="mt-2 w-full accent-accent"
+            />
+          </div>
+        </div>
+      )}
       <AvatarPicker name={name} currentAvatar={profile.avatar} color="#b688d6" onFile={setAvatarFile} label="Foto do perfil" />
       <div className="mb-4 rounded-xl border border-line bg-[#fbfbfb] px-3 py-3">
         <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Tipo de acesso</div>
         <div className="mt-1 text-sm font-semibold text-primary">{roleLabel}</div>
       </div>
       <Field label="Nome" value={name} onChange={setName} placeholder="Seu nome" />
+      {isMember && (
+        <div className="mb-4">
+          <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-muted">Frase do topo</label>
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={3}
+            className="w-full resize-none rounded-xl border border-line bg-white px-4 py-3 text-sm text-primary outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/10"
+            placeholder="Ex.: Estratégia, criação e organização de conteúdo com clareza."
+          />
+        </div>
+      )}
       <div className="mb-4 rounded-xl border border-line bg-white px-3 py-3">
         <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">E-mail</div>
         <div className="mt-1 break-all text-sm font-semibold text-primary">{profile.email}</div>
@@ -4716,7 +5103,13 @@ function MemberProfileModal({
         onClick={async () => {
           setSaving(true);
           try {
-            await onSave({ name: name.trim(), avatar_file: avatarFile });
+            await onSave({
+              name: name.trim(),
+              avatar_file: avatarFile,
+              banner_file: bannerFile,
+              profile_description: isMember ? description.trim() : undefined,
+              profile_banner_position: isMember ? bannerPosition : undefined
+            });
             onClose();
           } finally {
             setSaving(false);
@@ -5742,6 +6135,441 @@ function PostFormModal({
   );
 }
 
+function MetricsView({
+  metric,
+  previousMetric,
+  metrics,
+  activityHistory,
+  clients,
+  activeClient,
+  activeClientId,
+  setActiveClientId,
+  monthFilter,
+  setMonthFilter,
+  availableMonths,
+  agencyName,
+  canEdit,
+  isClient,
+  onEdit,
+  onFeedback
+}: {
+  metric: MonthlyMetric | null;
+  previousMetric: MonthlyMetric | null;
+  metrics: MonthlyMetric[];
+  activityHistory: ActivityHistory[];
+  clients: Client[];
+  activeClient: Client | null;
+  activeClientId: string;
+  setActiveClientId: (id: string) => void;
+  monthFilter: string;
+  setMonthFilter: (value: string) => void;
+  availableMonths: string[];
+  agencyName: string;
+  canEdit: boolean;
+  isClient: boolean;
+  onEdit: () => void;
+  onFeedback: (metric: MonthlyMetric, feedback: string) => Promise<void>;
+}) {
+  const [feedbackDraft, setFeedbackDraft] = useState("");
+  const [savingFeedback, setSavingFeedback] = useState(false);
+  useEffect(() => {
+    setFeedbackDraft(metric?.client_feedback ?? "");
+  }, [metric?.id, metric?.client_feedback]);
+  const monthKey = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+  const headline = `${months[Number(monthKey.slice(5, 7)) - 1]} ${monthKey.slice(0, 4)}`;
+  const status = metric?.status ?? "filling";
+  const statusMeta = monthlyMetricStatusMeta[status];
+  const reachTotal = (metric?.instagram_reach ?? 0) + (metric?.paid_reach ?? 0);
+  const previousReachTotal = (previousMetric?.instagram_reach ?? 0) + (previousMetric?.paid_reach ?? 0);
+  const impressionsTotal = (metric?.instagram_impressions ?? 0) + (metric?.paid_impressions ?? 0);
+  const previousImpressionsTotal = (previousMetric?.instagram_impressions ?? 0) + (previousMetric?.paid_impressions ?? 0);
+  const costPerLead = metric?.paid_investment && metric?.paid_leads ? metric.paid_investment / metric.paid_leads : null;
+  const previousCostPerLead = previousMetric?.paid_investment && previousMetric?.paid_leads ? previousMetric.paid_investment / previousMetric.paid_leads : null;
+  const metricHistory = [...metrics].sort((a, b) => metricMonthKey(a).localeCompare(metricMonthKey(b))).slice(-6);
+  const organic = [
+    { label: "Seguidores", value: metric?.instagram_followers, previous: previousMetric?.instagram_followers },
+    { label: "Alcance", value: metric?.instagram_reach, previous: previousMetric?.instagram_reach },
+    { label: "Impressões", value: metric?.instagram_impressions, previous: previousMetric?.instagram_impressions },
+    { label: "Cliques no link", value: metric?.instagram_link_clicks, previous: previousMetric?.instagram_link_clicks },
+    { label: "Engajamento total", value: metric?.instagram_engagement, previous: previousMetric?.instagram_engagement }
+  ];
+  const paid = [
+    { label: "Investimento", value: metric?.paid_investment, previous: previousMetric?.paid_investment, money: true },
+    { label: "Alcance pago", value: metric?.paid_reach, previous: previousMetric?.paid_reach },
+    { label: "Impressões pagas", value: metric?.paid_impressions, previous: previousMetric?.paid_impressions },
+    { label: "Cliques", value: metric?.paid_clicks, previous: previousMetric?.paid_clicks },
+    { label: "Leads", value: metric?.paid_leads, previous: previousMetric?.paid_leads },
+    { label: "Custo por lead", value: costPerLead, previous: previousCostPerLead, money: true, lowerIsBetter: true }
+  ];
+  const summary = [
+    { label: "Alcance total", value: reachTotal || null, previous: previousReachTotal || null },
+    { label: "Impressões totais", value: impressionsTotal || null, previous: previousImpressionsTotal || null },
+    { label: "Seguidores", value: metric?.instagram_followers, previous: previousMetric?.instagram_followers },
+    { label: "Investimento em tráfego", value: metric?.paid_investment, previous: previousMetric?.paid_investment, money: true }
+  ];
+
+  function exportReport() {
+    if (!metric || !activeClient) return;
+    exportMetricsReport({
+      agencyName,
+      clientName: activeClient.name,
+      headline,
+      metric,
+      previousMetric,
+      history: metricHistory
+    });
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="premium-card rounded-[18px] p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Relatório mensal</p>
+            <h2 className="mt-1 text-xl font-semibold text-primary">Métricas</h2>
+            <p className="mt-1 text-sm text-muted">Resultados cadastrados manualmente com comparação automática do mês anterior.</p>
+          </div>
+          {metric && <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: statusMeta.bg, color: statusMeta.color }}>{statusMeta.label}</span>}
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_1fr_auto_auto]">
+          <SelectBox label="Cliente" value={activeClientId} onChange={setActiveClientId}>
+            {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+          </SelectBox>
+          <SelectBox label="Mês" value={monthKey} onChange={setMonthFilter}>
+            {availableMonths.map((month) => <option key={month} value={month}>{month.slice(5, 7)}/{month.slice(0, 4)}</option>)}
+          </SelectBox>
+          {canEdit && (
+            <button className="mt-5 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-soft" onClick={onEdit}>
+              <Plus className="h-4 w-4" /> {metric ? "Editar métricas" : "Adicionar métricas"}
+            </button>
+          )}
+          <button
+            disabled={!metric}
+            className="mt-5 inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-line bg-white px-4 text-sm font-semibold text-primary shadow-soft disabled:opacity-45"
+            onClick={exportReport}
+          >
+            <ExternalLink className="h-4 w-4" /> Exportar relatório
+          </button>
+        </div>
+      </div>
+
+      {!metric ? (
+        <EmptyState
+          title="Nenhuma métrica cadastrada"
+          description={canEdit ? "Adicione os principais números do mês para gerar a visão de resultados do cliente." : "A agência ainda não cadastrou as métricas deste mês."}
+          action={canEdit ? { label: "Adicionar métricas", onClick: onEdit } : undefined}
+        />
+      ) : (
+        <>
+          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {summary.map((item) => <MetricCard key={item.label} {...item} compact />)}
+          </section>
+          <MetricSection title="Instagram / Orgânico" items={organic} />
+          <MetricSection title="Tráfego pago" items={paid} />
+          <section className="grid gap-4 xl:grid-cols-3">
+            <MetricChart title="Evolução de alcance" history={metricHistory} getValue={(item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)} />
+            <MetricChart title="Evolução de seguidores" history={metricHistory} getValue={(item) => item.instagram_followers ?? 0} />
+            <InvestmentLeadChart history={metricHistory} />
+          </section>
+          <MetricHistoryTimeline history={activityHistory.filter((item) => item.item_id === metric.id)} />
+          <section className="premium-card rounded-[18px] p-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-primary">Feedback do cliente sobre os resultados</h3>
+                <p className="mt-1 text-sm text-muted">{isClient ? "Registre sua percepção do mês para a agência acompanhar." : "Esse comentário fica visível para a agência e para o cliente."}</p>
+              </div>
+            </div>
+            {isClient ? (
+              <>
+                <textarea
+                  value={feedbackDraft}
+                  onChange={(event) => setFeedbackDraft(event.target.value)}
+                  className="min-h-28 w-full rounded-xl border border-border-mid bg-white p-3 text-sm outline-none transition focus:border-accent focus:ring-4 focus:ring-accent/15"
+                  placeholder="Escreva um feedback geral sobre os resultados..."
+                />
+                <button
+                  disabled={savingFeedback}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+                  onClick={async () => {
+                    setSavingFeedback(true);
+                    try {
+                      await onFeedback(metric, feedbackDraft.trim());
+                    } finally {
+                      setSavingFeedback(false);
+                    }
+                  }}
+                >
+                  {savingFeedback && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Salvar feedback
+                </button>
+              </>
+            ) : (
+              <div className="rounded-[14px] border border-line bg-[#fbfbfb] p-4 text-sm leading-6 text-muted">
+                {metric.client_feedback || "Nenhum feedback enviado pelo cliente ainda."}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MetricSection({
+  title,
+  items
+}: {
+  title: string;
+  items: { label: string; value?: number | null; previous?: number | null; money?: boolean; lowerIsBetter?: boolean }[];
+}) {
+  return (
+    <section className="premium-card rounded-[18px] p-4 sm:p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-base font-semibold text-primary">{title}</h3>
+        <span className="rounded-full bg-accent-light px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-accent-dark">Mensal</span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {items.map((item) => <MetricCard key={item.label} {...item} />)}
+      </div>
+    </section>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  previous,
+  money,
+  lowerIsBetter,
+  compact
+}: {
+  label: string;
+  value?: number | null;
+  previous?: number | null;
+  money?: boolean;
+  lowerIsBetter?: boolean;
+  compact?: boolean;
+}) {
+  const comparison = metricComparison(value, previous);
+  const currentValue = money ? metricCurrency(value) : metricValue(value);
+  const previousValue = money ? metricCurrency(previous) : metricValue(previous);
+  const positive = comparison ? comparison.startsWith("+") : false;
+  const negative = comparison ? comparison.startsWith("-") : false;
+  const improved = lowerIsBetter ? negative : positive;
+  const declined = lowerIsBetter ? positive : negative;
+  return (
+    <div className="rounded-[16px] border border-line bg-white/80 p-4 shadow-soft">
+      <div className="text-[11px] font-semibold text-muted">{label}</div>
+      <div className={cn("mt-2 font-light tracking-[-0.03em] text-primary", compact ? "text-xl" : "text-2xl")}>{currentValue}</div>
+      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-muted">
+        <span>Mês anterior: {previousValue}</span>
+        {comparison && (
+          <span className={cn(
+            "rounded-full px-2 py-0.5 font-semibold",
+            improved && "bg-accent-light text-accent-dark",
+            declined && "bg-[#f6e7ee] text-[#8a4a63]",
+            !improved && !declined && "bg-[#f7f6fa] text-muted"
+          )}>
+            {comparison}
+          </span>
+        )}
+      </div>
+      {!compact && <MetricBars current={value} previous={previous} />}
+    </div>
+  );
+}
+
+function MetricBars({ current, previous }: { current?: number | null; previous?: number | null }) {
+  const max = Math.max(current ?? 0, previous ?? 0, 1);
+  return (
+    <div className="mt-4 space-y-1.5">
+      <div className="h-1.5 overflow-hidden rounded-full bg-[#f0eef5]">
+        <div className="h-full rounded-full bg-primary/70" style={{ width: `${Math.max(6, ((current ?? 0) / max) * 100)}%` }} />
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-[#f0eef5]">
+        <div className="h-full rounded-full bg-accent/45" style={{ width: `${Math.max(6, ((previous ?? 0) / max) * 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function MetricChart({
+  title,
+  history,
+  getValue
+}: {
+  title: string;
+  history: MonthlyMetric[];
+  getValue: (item: MonthlyMetric) => number;
+}) {
+  const values = history.map(getValue);
+  const max = Math.max(...values, 1);
+  const points = values.map((value, index) => {
+    const x = history.length <= 1 ? 50 : (index / (history.length - 1)) * 100;
+    const y = 86 - (value / max) * 64;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <div className="premium-card rounded-[18px] p-5">
+      <h3 className="text-sm font-semibold text-primary">{title}</h3>
+      <svg viewBox="0 0 100 96" className="mt-4 h-32 w-full overflow-visible">
+        <polyline points="0,86 100,86" fill="none" stroke="#eeeaf6" strokeWidth="1" />
+        <polyline points={points} fill="none" stroke="#7450a8" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        {values.map((value, index) => {
+          const x = history.length <= 1 ? 50 : (index / (history.length - 1)) * 100;
+          const y = 86 - (value / max) * 64;
+          return <circle key={`${history[index]?.id}-${index}`} cx={x} cy={y} r="2.4" fill="#170b43" />;
+        })}
+      </svg>
+      <div className="mt-2 flex justify-between text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">
+        {history.map((item) => <span key={item.id}>{String(item.month).padStart(2, "0")}/{String(item.year).slice(2)}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function InvestmentLeadChart({ history }: { history: MonthlyMetric[] }) {
+  const maxInvestment = Math.max(...history.map((item) => item.paid_investment ?? 0), 1);
+  const maxLeads = Math.max(...history.map((item) => item.paid_leads ?? 0), 1);
+  return (
+    <div className="premium-card rounded-[18px] p-5">
+      <h3 className="text-sm font-semibold text-primary">Investimento x leads</h3>
+      <div className="mt-5 flex h-32 items-end gap-3">
+        {history.map((item) => (
+          <div key={item.id} className="flex flex-1 items-end justify-center gap-1.5">
+            <div className="w-3 rounded-t-full bg-primary/70" style={{ height: `${Math.max(8, ((item.paid_investment ?? 0) / maxInvestment) * 100)}%` }} />
+            <div className="w-3 rounded-t-full bg-accent/50" style={{ height: `${Math.max(8, ((item.paid_leads ?? 0) / maxLeads) * 100)}%` }} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 flex items-center gap-4 text-[11px] text-muted">
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-primary/70" /> Investimento</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-accent/50" /> Leads</span>
+      </div>
+    </div>
+  );
+}
+
+function MetricHistoryTimeline({ history }: { history: ActivityHistory[] }) {
+  return (
+    <section className="premium-card rounded-[18px] p-5">
+      <div className="mb-4">
+        <h3 className="text-base font-semibold text-primary">Histórico do relatório</h3>
+        <p className="mt-1 text-sm text-muted">Movimentos principais deste mês.</p>
+      </div>
+      {history.length ? (
+        <div className="space-y-3">
+          {history.map((item) => (
+            <div key={item.id} className="flex gap-3 rounded-[14px] border border-line bg-[#fbfbfb] p-3">
+              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-accent" />
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-primary">{item.description || item.action}</div>
+                <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted">{formatTimelineDate(item.created_at)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-[14px] border border-line bg-[#fbfbfb] p-4 text-sm text-muted">Nenhum movimento registrado ainda.</div>
+      )}
+    </section>
+  );
+}
+
+function exportMetricsReport({
+  agencyName,
+  clientName,
+  headline,
+  metric,
+  previousMetric,
+  history
+}: {
+  agencyName: string;
+  clientName: string;
+  headline: string;
+  metric: MonthlyMetric;
+  previousMetric: MonthlyMetric | null;
+  history: MonthlyMetric[];
+}) {
+  const costPerLead = metric.paid_investment && metric.paid_leads ? metric.paid_investment / metric.paid_leads : null;
+  const previousCostPerLead = previousMetric?.paid_investment && previousMetric.paid_leads ? previousMetric.paid_investment / previousMetric.paid_leads : null;
+  const reachTotal = (metric.instagram_reach ?? 0) + (metric.paid_reach ?? 0);
+  const impressionsTotal = (metric.instagram_impressions ?? 0) + (metric.paid_impressions ?? 0);
+  const rows = [
+    ["Seguidores", metricValue(metric.instagram_followers), metricComparison(metric.instagram_followers, previousMetric?.instagram_followers) ?? "—"],
+    ["Alcance", metricValue(metric.instagram_reach), metricComparison(metric.instagram_reach, previousMetric?.instagram_reach) ?? "—"],
+    ["Impressões", metricValue(metric.instagram_impressions), metricComparison(metric.instagram_impressions, previousMetric?.instagram_impressions) ?? "—"],
+    ["Cliques no link", metricValue(metric.instagram_link_clicks), metricComparison(metric.instagram_link_clicks, previousMetric?.instagram_link_clicks) ?? "—"],
+    ["Engajamento total", metricValue(metric.instagram_engagement), metricComparison(metric.instagram_engagement, previousMetric?.instagram_engagement) ?? "—"],
+    ["Investimento", metricCurrency(metric.paid_investment), metricComparison(metric.paid_investment, previousMetric?.paid_investment) ?? "—"],
+    ["Alcance pago", metricValue(metric.paid_reach), metricComparison(metric.paid_reach, previousMetric?.paid_reach) ?? "—"],
+    ["Impressões pagas", metricValue(metric.paid_impressions), metricComparison(metric.paid_impressions, previousMetric?.paid_impressions) ?? "—"],
+    ["Cliques pagos", metricValue(metric.paid_clicks), metricComparison(metric.paid_clicks, previousMetric?.paid_clicks) ?? "—"],
+    ["Leads", metricValue(metric.paid_leads), metricComparison(metric.paid_leads, previousMetric?.paid_leads) ?? "—"],
+    ["Custo por lead", metricCurrency(costPerLead), metricComparison(costPerLead, previousCostPerLead) ?? "—"]
+  ];
+  const chartLabels = history.map((item) => `${String(item.month).padStart(2, "0")}/${String(item.year).slice(2)}`).join(" · ");
+  const html = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Relatório ${clientName} - ${headline}</title>
+  <style>
+    body { margin: 0; background: #f7f6fa; color: #170b43; font-family: Inter, Arial, sans-serif; }
+    .page { max-width: 920px; margin: 0 auto; padding: 44px; }
+    .hero { border-radius: 28px; background: linear-gradient(135deg, #170b43, #7450a8); color: white; padding: 34px; }
+    .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .16em; opacity: .72; font-weight: 800; }
+    h1 { margin: 10px 0 6px; font-size: 34px; letter-spacing: -.03em; }
+    .muted { color: #8f8aa6; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 22px 0; }
+    .card { background: white; border: 1px solid #e6e2ef; border-radius: 18px; padding: 18px; box-shadow: 0 18px 50px rgba(23, 11, 67, .08); }
+    .label { font-size: 11px; color: #8f8aa6; font-weight: 700; }
+    .value { margin-top: 8px; font-size: 25px; font-weight: 300; letter-spacing: -.03em; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 18px; overflow: hidden; margin-top: 16px; }
+    th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid #eeeaf6; font-size: 13px; }
+    th { color: #8f8aa6; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
+    .section { margin-top: 26px; }
+    .bar { height: 9px; background: #eeeaf6; border-radius: 99px; overflow: hidden; margin-top: 10px; }
+    .bar span { display: block; height: 100%; background: #7450a8; border-radius: 99px; }
+    @media print { body { background: white; } .page { padding: 24px; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div class="eyebrow">ReveeAprove · Relatório mensal</div>
+      <h1>${clientName}</h1>
+      <div>${agencyName} · ${headline}</div>
+    </section>
+    <section class="grid">
+      <div class="card"><div class="label">Alcance total</div><div class="value">${metricValue(reachTotal)}</div></div>
+      <div class="card"><div class="label">Impressões totais</div><div class="value">${metricValue(impressionsTotal)}</div></div>
+      <div class="card"><div class="label">Seguidores</div><div class="value">${metricValue(metric.instagram_followers)}</div></div>
+      <div class="card"><div class="label">Investimento</div><div class="value">${metricCurrency(metric.paid_investment)}</div></div>
+    </section>
+    <section class="section card">
+      <div class="eyebrow muted">Comparativo com mês anterior</div>
+      <table>
+        <thead><tr><th>Métrica</th><th>Resultado</th><th>Variação</th></tr></thead>
+        <tbody>${rows.map((row) => `<tr><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td></tr>`).join("")}</tbody>
+      </table>
+    </section>
+    <section class="section card">
+      <div class="eyebrow muted">Evolução recente</div>
+      <p class="muted">${chartLabels || "Sem histórico suficiente."}</p>
+      <div class="bar"><span style="width:${Math.min(100, Math.max(8, (reachTotal / Math.max(...history.map((item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)), reachTotal, 1)) * 100))}%"></span></div>
+    </section>
+    ${metric.client_feedback ? `<section class="section card"><div class="eyebrow muted">Feedback do cliente</div><p>${metric.client_feedback}</p></section>` : ""}
+  </main>
+  <script>window.print();</script>
+</body>
+</html>`;
+  const popup = window.open("", "_blank", "width=980,height=760");
+  if (!popup) return;
+  popup.document.write(html);
+  popup.document.close();
+}
+
 function CampaignsView({
   campaigns,
   clients,
@@ -5866,6 +6694,132 @@ function InfoMini({ label, value }: { label: string; value: string }) {
       <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</div>
       <div className="mt-1 truncate text-sm font-semibold text-primary">{value}</div>
     </div>
+  );
+}
+
+function MetricsFormModal({
+  open,
+  clients,
+  activeClientId,
+  metric,
+  monthFilter,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  clients: Client[];
+  activeClientId: string;
+  metric: MonthlyMetric | null;
+  monthFilter: string;
+  onClose: () => void;
+  onSave: (input: MonthlyMetricFormInput) => Promise<void>;
+}) {
+  const currentMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+  const [form, setForm] = useState<MonthlyMetricFormInput>({
+    client_id: activeClientId,
+    month: Number(currentMonth.slice(5, 7)),
+    year: Number(currentMonth.slice(0, 4)),
+    instagram_followers: "",
+    instagram_reach: "",
+    instagram_impressions: "",
+    instagram_link_clicks: "",
+    instagram_engagement: "",
+    paid_investment: "",
+    paid_reach: "",
+    paid_impressions: "",
+    paid_clicks: "",
+    paid_leads: "",
+    status: "filling"
+  });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const baseMonth = monthFilter === "all" ? new Date().toISOString().slice(0, 7) : monthFilter;
+    setForm({
+      client_id: metric?.client_id ?? activeClientId,
+      month: metric?.month ?? Number(baseMonth.slice(5, 7)),
+      year: metric?.year ?? Number(baseMonth.slice(0, 4)),
+      instagram_followers: metric?.instagram_followers ? String(metric.instagram_followers) : "",
+      instagram_reach: metric?.instagram_reach ? String(metric.instagram_reach) : "",
+      instagram_impressions: metric?.instagram_impressions ? String(metric.instagram_impressions) : "",
+      instagram_link_clicks: metric?.instagram_link_clicks ? String(metric.instagram_link_clicks) : "",
+      instagram_engagement: metric?.instagram_engagement ? String(metric.instagram_engagement) : "",
+      paid_investment: metric?.paid_investment ? formatCurrency(metric.paid_investment) : "",
+      paid_reach: metric?.paid_reach ? String(metric.paid_reach) : "",
+      paid_impressions: metric?.paid_impressions ? String(metric.paid_impressions) : "",
+      paid_clicks: metric?.paid_clicks ? String(metric.paid_clicks) : "",
+      paid_leads: metric?.paid_leads ? String(metric.paid_leads) : "",
+      status: metric?.status ?? "filling"
+    });
+  }, [activeClientId, metric, monthFilter, open]);
+  if (!open) return null;
+  const update = <K extends keyof MonthlyMetricFormInput>(key: K, value: MonthlyMetricFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
+  const costPerLead = parseCurrencyInput(form.paid_investment) && parseMetricNumber(form.paid_leads)
+    ? parseCurrencyInput(form.paid_investment) / parseMetricNumber(form.paid_leads)
+    : null;
+  return (
+    <ModalFrame title={metric ? "Editar métricas" : "Adicionar métricas do mês"} onClose={onClose}>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <SelectBox label="Cliente" value={form.client_id} onChange={(value) => update("client_id", value)}>
+          {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+        </SelectBox>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Mês" type="number" value={String(form.month)} onChange={(value) => update("month", Number(value))} />
+          <Field label="Ano" type="number" value={String(form.year)} onChange={(value) => update("year", Number(value))} />
+        </div>
+        <SelectBox label="Status do mês" value={form.status} onChange={(value) => update("status", value as MonthlyMetricStatus)}>
+          {Object.entries(monthlyMetricStatusMeta).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
+        </SelectBox>
+      </div>
+
+      <div className="mb-5 rounded-[16px] border border-line bg-[#fbfbfb] p-4">
+        <h3 className="mb-3 text-sm font-semibold text-primary">Instagram / Orgânico</h3>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Field label="Seguidores" value={form.instagram_followers} onChange={(value) => update("instagram_followers", value)} inputMode="numeric" />
+          <Field label="Alcance" value={form.instagram_reach} onChange={(value) => update("instagram_reach", value)} inputMode="numeric" />
+          <Field label="Impressões" value={form.instagram_impressions} onChange={(value) => update("instagram_impressions", value)} inputMode="numeric" />
+          <Field label="Cliques no link" value={form.instagram_link_clicks} onChange={(value) => update("instagram_link_clicks", value)} inputMode="numeric" />
+          <Field label="Engajamento total" value={form.instagram_engagement} onChange={(value) => update("instagram_engagement", value)} inputMode="numeric" />
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-[16px] border border-line bg-[#fbfbfb] p-4">
+        <h3 className="mb-3 text-sm font-semibold text-primary">Tráfego pago</h3>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Field
+            label="Investimento"
+            value={form.paid_investment}
+            onChange={(value) => update("paid_investment", value)}
+            onBlur={() => update("paid_investment", formatCurrencyInput(form.paid_investment))}
+            inputMode="decimal"
+            placeholder="R$ 0,00"
+          />
+          <Field label="Alcance pago" value={form.paid_reach} onChange={(value) => update("paid_reach", value)} inputMode="numeric" />
+          <Field label="Impressões pagas" value={form.paid_impressions} onChange={(value) => update("paid_impressions", value)} inputMode="numeric" />
+          <Field label="Cliques" value={form.paid_clicks} onChange={(value) => update("paid_clicks", value)} inputMode="numeric" />
+          <Field label="Leads" value={form.paid_leads} onChange={(value) => update("paid_leads", value)} inputMode="numeric" />
+          <InfoMini label="Custo por lead" value={costPerLead ? formatCurrency(costPerLead) : "—"} />
+        </div>
+      </div>
+
+      <button
+        disabled={saving || !form.client_id || !form.month || !form.year}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white disabled:opacity-50"
+        onClick={async () => {
+          setSaving(true);
+          try {
+            await onSave(form);
+          } catch (error) {
+            window.alert(error instanceof Error ? error.message : "Nao foi possivel salvar as metricas.");
+          } finally {
+            setSaving(false);
+          }
+        }}
+      >
+        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+        Salvar métricas
+      </button>
+    </ModalFrame>
   );
 }
 

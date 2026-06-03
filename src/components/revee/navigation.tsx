@@ -39,6 +39,9 @@ export type NotificationItem = {
   postId?: string;
   campaignId?: string;
   goalId?: string;
+  metricId?: string;
+  clientId?: string;
+  monthKey?: string;
   createdAt: string;
 };
 

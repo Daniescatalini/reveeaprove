@@ -28,6 +28,9 @@ export type Profile = {
   email: string;
   role: UserRole;
   avatar?: string | null;
+  profile_banner?: string | null;
+  profile_description?: string | null;
+  profile_banner_position?: number | null;
   agency_id?: string | null;
   client_id?: string | null;
 };
@@ -114,7 +117,8 @@ export type ReferralStatus = "pending" | "active" | "converted" | "credited" | "
 export type CampaignStatus = "creating" | "awaiting_approval" | "approved" | "active" | "paused" | "finished" | "revision_requested";
 export type CampaignPlatform = "Meta Ads" | "Google Ads" | "TikTok Ads" | "Pinterest Ads" | "Outra";
 export type MonthlyGoalStatus = "planned" | "in_progress" | "done" | "paused" | "cancelled";
-export type ActivityItemType = "post" | "campaign" | "monthly_goal";
+export type MonthlyMetricStatus = "filling" | "sent_to_client" | "reviewed" | "closed";
+export type ActivityItemType = "post" | "campaign" | "monthly_goal" | "monthly_metric";
 export type NotificationItemType = ActivityItemType | "billing" | "referral";
 
 export type Subscription = {
@@ -207,6 +211,29 @@ export type MonthlyGoal = {
   status: MonthlyGoalStatus;
   client_feedback?: string | null;
   result_notes?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+};
+
+export type MonthlyMetric = {
+  id: string;
+  agency_id: string;
+  client_id: string;
+  month: number;
+  year: number;
+  instagram_followers?: number | null;
+  instagram_reach?: number | null;
+  instagram_impressions?: number | null;
+  instagram_link_clicks?: number | null;
+  instagram_engagement?: number | null;
+  paid_investment?: number | null;
+  paid_reach?: number | null;
+  paid_impressions?: number | null;
+  paid_clicks?: number | null;
+  paid_leads?: number | null;
+  status?: MonthlyMetricStatus | null;
+  client_feedback?: string | null;
+  created_by?: string | null;
   created_at: string;
   updated_at?: string | null;
 };
