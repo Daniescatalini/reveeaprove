@@ -124,6 +124,11 @@ type MonthlyMetricFormInput = {
   instagram_impressions: string;
   instagram_link_clicks: string;
   instagram_engagement: string;
+  instagram_likes: string;
+  instagram_comments: string;
+  instagram_saves: string;
+  instagram_shares: string;
+  instagram_reposts: string;
   paid_investment: string;
   paid_reach: string;
   paid_impressions: string;
@@ -385,6 +390,11 @@ const seedMonthlyMetrics: MonthlyMetric[] = [
     instagram_impressions: 89300,
     instagram_link_clicks: 860,
     instagram_engagement: 3920,
+    instagram_likes: 2140,
+    instagram_comments: 280,
+    instagram_saves: 740,
+    instagram_shares: 510,
+    instagram_reposts: 35,
     paid_investment: 1800,
     paid_reach: 64500,
     paid_impressions: 118000,
@@ -2531,6 +2541,11 @@ export function ReveeApp() {
       instagram_impressions: parseMetricNumber(input.instagram_impressions) || null,
       instagram_link_clicks: parseMetricNumber(input.instagram_link_clicks) || null,
       instagram_engagement: parseMetricNumber(input.instagram_engagement) || null,
+      instagram_likes: parseMetricNumber(input.instagram_likes) || null,
+      instagram_comments: parseMetricNumber(input.instagram_comments) || null,
+      instagram_saves: parseMetricNumber(input.instagram_saves) || null,
+      instagram_shares: parseMetricNumber(input.instagram_shares) || null,
+      instagram_reposts: parseMetricNumber(input.instagram_reposts) || null,
       paid_investment: parseCurrencyInput(input.paid_investment) || null,
       paid_reach: parseMetricNumber(input.paid_reach) || null,
       paid_impressions: parseMetricNumber(input.paid_impressions) || null,
@@ -6186,12 +6201,17 @@ function MetricsView({
   const costPerLead = metric?.paid_investment && metric?.paid_leads ? metric.paid_investment / metric.paid_leads : null;
   const previousCostPerLead = previousMetric?.paid_investment && previousMetric?.paid_leads ? previousMetric.paid_investment / previousMetric.paid_leads : null;
   const metricHistory = [...metrics].sort((a, b) => metricMonthKey(a).localeCompare(metricMonthKey(b))).slice(-6);
-  const organic = [
-    { label: "Seguidores", value: metric?.instagram_followers, previous: previousMetric?.instagram_followers },
-    { label: "Alcance", value: metric?.instagram_reach, previous: previousMetric?.instagram_reach },
+  const general = [
     { label: "Impressões", value: metric?.instagram_impressions, previous: previousMetric?.instagram_impressions },
-    { label: "Cliques no link", value: metric?.instagram_link_clicks, previous: previousMetric?.instagram_link_clicks },
-    { label: "Engajamento total", value: metric?.instagram_engagement, previous: previousMetric?.instagram_engagement }
+    { label: "Interações", value: metric?.instagram_engagement, previous: previousMetric?.instagram_engagement },
+    { label: "Seguidores", value: metric?.instagram_followers, previous: previousMetric?.instagram_followers }
+  ];
+  const engagements = [
+    { label: "Curtidas", value: metric?.instagram_likes, previous: previousMetric?.instagram_likes },
+    { label: "Comentários", value: metric?.instagram_comments, previous: previousMetric?.instagram_comments },
+    { label: "Salvamentos", value: metric?.instagram_saves, previous: previousMetric?.instagram_saves },
+    { label: "Compartilhamentos", value: metric?.instagram_shares, previous: previousMetric?.instagram_shares },
+    { label: "Repost", value: metric?.instagram_reposts, previous: previousMetric?.instagram_reposts }
   ];
   const paid = [
     { label: "Investimento", value: metric?.paid_investment, previous: previousMetric?.paid_investment, money: true },
@@ -6264,7 +6284,8 @@ function MetricsView({
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {summary.map((item) => <MetricCard key={item.label} {...item} compact />)}
           </section>
-          <MetricSection title="Instagram / Orgânico" items={organic} />
+          <MetricSection title="Geral" items={general} />
+          <MetricSection title="Engajamentos" items={engagements} />
           <MetricSection title="Tráfego pago" items={paid} />
           <section className="grid gap-4 xl:grid-cols-3">
             <MetricChart title="Evolução de alcance" history={metricHistory} getValue={(item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)} />
@@ -6496,11 +6517,14 @@ function exportMetricsReport({
   const reachTotal = (metric.instagram_reach ?? 0) + (metric.paid_reach ?? 0);
   const impressionsTotal = (metric.instagram_impressions ?? 0) + (metric.paid_impressions ?? 0);
   const rows = [
-    ["Seguidores", metricValue(metric.instagram_followers), metricComparison(metric.instagram_followers, previousMetric?.instagram_followers) ?? "—"],
-    ["Alcance", metricValue(metric.instagram_reach), metricComparison(metric.instagram_reach, previousMetric?.instagram_reach) ?? "—"],
-    ["Impressões", metricValue(metric.instagram_impressions), metricComparison(metric.instagram_impressions, previousMetric?.instagram_impressions) ?? "—"],
-    ["Cliques no link", metricValue(metric.instagram_link_clicks), metricComparison(metric.instagram_link_clicks, previousMetric?.instagram_link_clicks) ?? "—"],
-    ["Engajamento total", metricValue(metric.instagram_engagement), metricComparison(metric.instagram_engagement, previousMetric?.instagram_engagement) ?? "—"],
+    ["Geral · Impressões", metricValue(metric.instagram_impressions), metricComparison(metric.instagram_impressions, previousMetric?.instagram_impressions) ?? "—"],
+    ["Geral · Interações", metricValue(metric.instagram_engagement), metricComparison(metric.instagram_engagement, previousMetric?.instagram_engagement) ?? "—"],
+    ["Geral · Seguidores", metricValue(metric.instagram_followers), metricComparison(metric.instagram_followers, previousMetric?.instagram_followers) ?? "—"],
+    ["Engajamentos · Curtidas", metricValue(metric.instagram_likes), metricComparison(metric.instagram_likes, previousMetric?.instagram_likes) ?? "—"],
+    ["Engajamentos · Comentários", metricValue(metric.instagram_comments), metricComparison(metric.instagram_comments, previousMetric?.instagram_comments) ?? "—"],
+    ["Engajamentos · Salvamentos", metricValue(metric.instagram_saves), metricComparison(metric.instagram_saves, previousMetric?.instagram_saves) ?? "—"],
+    ["Engajamentos · Compartilhamentos", metricValue(metric.instagram_shares), metricComparison(metric.instagram_shares, previousMetric?.instagram_shares) ?? "—"],
+    ["Engajamentos · Repost", metricValue(metric.instagram_reposts), metricComparison(metric.instagram_reposts, previousMetric?.instagram_reposts) ?? "—"],
     ["Investimento", metricCurrency(metric.paid_investment), metricComparison(metric.paid_investment, previousMetric?.paid_investment) ?? "—"],
     ["Alcance pago", metricValue(metric.paid_reach), metricComparison(metric.paid_reach, previousMetric?.paid_reach) ?? "—"],
     ["Impressões pagas", metricValue(metric.paid_impressions), metricComparison(metric.paid_impressions, previousMetric?.paid_impressions) ?? "—"],
@@ -6724,6 +6748,11 @@ function MetricsFormModal({
     instagram_impressions: "",
     instagram_link_clicks: "",
     instagram_engagement: "",
+    instagram_likes: "",
+    instagram_comments: "",
+    instagram_saves: "",
+    instagram_shares: "",
+    instagram_reposts: "",
     paid_investment: "",
     paid_reach: "",
     paid_impressions: "",
@@ -6744,6 +6773,11 @@ function MetricsFormModal({
       instagram_impressions: metric?.instagram_impressions ? String(metric.instagram_impressions) : "",
       instagram_link_clicks: metric?.instagram_link_clicks ? String(metric.instagram_link_clicks) : "",
       instagram_engagement: metric?.instagram_engagement ? String(metric.instagram_engagement) : "",
+      instagram_likes: metric?.instagram_likes ? String(metric.instagram_likes) : "",
+      instagram_comments: metric?.instagram_comments ? String(metric.instagram_comments) : "",
+      instagram_saves: metric?.instagram_saves ? String(metric.instagram_saves) : "",
+      instagram_shares: metric?.instagram_shares ? String(metric.instagram_shares) : "",
+      instagram_reposts: metric?.instagram_reposts ? String(metric.instagram_reposts) : "",
       paid_investment: metric?.paid_investment ? formatCurrency(metric.paid_investment) : "",
       paid_reach: metric?.paid_reach ? String(metric.paid_reach) : "",
       paid_impressions: metric?.paid_impressions ? String(metric.paid_impressions) : "",
@@ -6773,13 +6807,22 @@ function MetricsFormModal({
       </div>
 
       <div className="mb-5 rounded-[16px] border border-line bg-[#fbfbfb] p-4">
-        <h3 className="mb-3 text-sm font-semibold text-primary">Instagram / Orgânico</h3>
+        <h3 className="mb-3 text-sm font-semibold text-primary">Geral</h3>
         <div className="grid gap-4 lg:grid-cols-2">
-          <Field label="Seguidores" value={form.instagram_followers} onChange={(value) => update("instagram_followers", value)} inputMode="numeric" />
-          <Field label="Alcance" value={form.instagram_reach} onChange={(value) => update("instagram_reach", value)} inputMode="numeric" />
           <Field label="Impressões" value={form.instagram_impressions} onChange={(value) => update("instagram_impressions", value)} inputMode="numeric" />
-          <Field label="Cliques no link" value={form.instagram_link_clicks} onChange={(value) => update("instagram_link_clicks", value)} inputMode="numeric" />
-          <Field label="Engajamento total" value={form.instagram_engagement} onChange={(value) => update("instagram_engagement", value)} inputMode="numeric" />
+          <Field label="Interações" value={form.instagram_engagement} onChange={(value) => update("instagram_engagement", value)} inputMode="numeric" />
+          <Field label="Seguidores" value={form.instagram_followers} onChange={(value) => update("instagram_followers", value)} inputMode="numeric" />
+        </div>
+      </div>
+
+      <div className="mb-5 rounded-[16px] border border-line bg-[#fbfbfb] p-4">
+        <h3 className="mb-3 text-sm font-semibold text-primary">Engajamentos</h3>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Field label="Curtidas" value={form.instagram_likes} onChange={(value) => update("instagram_likes", value)} inputMode="numeric" />
+          <Field label="Comentários" value={form.instagram_comments} onChange={(value) => update("instagram_comments", value)} inputMode="numeric" />
+          <Field label="Salvamentos" value={form.instagram_saves} onChange={(value) => update("instagram_saves", value)} inputMode="numeric" />
+          <Field label="Compartilhamentos" value={form.instagram_shares} onChange={(value) => update("instagram_shares", value)} inputMode="numeric" />
+          <Field label="Repost" value={form.instagram_reposts} onChange={(value) => update("instagram_reposts", value)} inputMode="numeric" />
         </div>
       </div>
 

@@ -226,6 +226,11 @@ export type MonthlyMetric = {
   instagram_impressions?: number | null;
   instagram_link_clicks?: number | null;
   instagram_engagement?: number | null;
+  instagram_likes?: number | null;
+  instagram_comments?: number | null;
+  instagram_saves?: number | null;
+  instagram_shares?: number | null;
+  instagram_reposts?: number | null;
   paid_investment?: number | null;
   paid_reach?: number | null;
   paid_impressions?: number | null;
