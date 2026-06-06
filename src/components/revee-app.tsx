@@ -1151,20 +1151,9 @@ export function ReveeApp() {
       const agency = await loadAgencyProfile(nextProfile.agency_id, currentAccessToken);
       agencyDisplayName = agency?.name ?? nextProfile.name;
       setAgencyBillingDocument(agency?.billing_document ? formatCpfCnpj(agency.billing_document) : "");
-      let nextWorkspace = workspaceFromSettings(agency?.workspace_settings, agencyDisplayName);
-      if (!agency?.workspace_settings) {
-        try {
-          const localWorkspace = window.localStorage.getItem(`revee-workspace-${nextProfile.agency_id}`);
-          if (nextProfile.role === "agency" && localWorkspace) nextWorkspace = workspaceFromSettings(JSON.parse(localWorkspace), agencyDisplayName);
-        } catch {
-          nextWorkspace = workspaceFromSettings(null, agencyDisplayName);
-        }
-      }
+      const nextWorkspace = workspaceFromSettings(agency?.workspace_settings, agencyDisplayName);
       setWorkspace(nextWorkspace);
       agencyDisplayName = nextWorkspace.name;
-      if (nextProfile.role === "agency" && !agency?.workspace_settings && nextWorkspace !== defaultWorkspace) {
-        void supabase.from("agencies").update({ workspace_settings: nextWorkspace }).eq("id", nextProfile.agency_id);
-      }
     }
     setAgencyName(agencyDisplayName);
 
@@ -1175,6 +1164,16 @@ export function ReveeApp() {
     const { data: clientRows } = await clientQuery.order("created_at", { ascending: true });
     const loadedClients = (clientRows ?? []) as Client[];
     setClients(loadedClients);
+    if (nextProfile.role === "client") {
+      const linkedClient = loadedClients.find((client) => client.id === nextProfile.client_id);
+      if (linkedClient) {
+        setProfile((current) => current ? {
+          ...current,
+          name: linkedClient.name || current.name,
+          avatar: linkedClient.avatar ?? current.avatar
+        } : current);
+      }
+    }
     setActiveClientId((current) =>
       loadedClients.some((client) => client.id === current) ? current : loadedClients[0]?.id || ""
     );
@@ -1255,6 +1254,16 @@ export function ReveeApp() {
         .eq("agency_id", nextProfile.agency_id)
         .order("created_at", { ascending: true });
       setTeamMembers((memberRows ?? []) as TeamMember[]);
+      if (nextProfile.role === "member") {
+        const linkedMember = ((memberRows ?? []) as TeamMember[]).find((member) => member.user_id === nextProfile.id);
+        if (linkedMember) {
+          setProfile((current) => current ? {
+            ...current,
+            name: linkedMember.name || current.name,
+            avatar: linkedMember.avatar ?? current.avatar
+          } : current);
+        }
+      }
 
       const { data: subscriptionRow } = await supabase
         .from("subscriptions")
@@ -1772,12 +1781,27 @@ export function ReveeApp() {
     window.setTimeout(() => setToast(""), 2600);
   }
 
+  async function syncLinkedProfile(payload: Record<string, unknown>) {
+    if (!session?.access_token) return;
+    const response = await fetch("/api/profile/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error ?? "Não foi possível sincronizar o perfil.");
+    }
+  }
+
   const saveWorkspace = useCallback((nextWorkspace: AgencyWorkspace) => {
     const agencyScopedWorkspace = { ...nextWorkspace, name: nextWorkspace.name.trim() || agencyName };
     setWorkspace(agencyScopedWorkspace);
     if (agencyScopedWorkspace.name !== agencyName) setAgencyName(agencyScopedWorkspace.name);
     if (profile?.agency_id) {
-      window.localStorage.setItem(`revee-workspace-${profile.agency_id}`, JSON.stringify(agencyScopedWorkspace));
       supabase?.from("agencies").update({
         name: agencyScopedWorkspace.name,
         workspace_settings: agencyScopedWorkspace
@@ -1831,6 +1855,24 @@ export function ReveeApp() {
             updated_at: new Date().toISOString()
           })
           .eq("user_id", profile.id);
+        const linkedMember = teamMembers.find((member) => member.user_id === profile.id);
+        if (linkedMember) {
+          await syncLinkedProfile({
+            target: "member",
+            memberId: linkedMember.id,
+            name: input.name,
+            ...(avatar ? { avatar } : {})
+          });
+        }
+      }
+
+      if (profile.role === "client" && profile.client_id) {
+        await syncLinkedProfile({
+          target: "client",
+          clientId: profile.client_id,
+          name: input.name,
+          ...(avatar ? { avatar } : {})
+        });
       }
     }
 
@@ -1841,6 +1883,13 @@ export function ReveeApp() {
         name: input.name,
         ...(avatar ? { avatar } : {})
       } : member));
+    }
+    if (profile.role === "client" && profile.client_id) {
+      setClients((current) => current.map((client) => client.id === profile.client_id ? {
+        ...client,
+        name: input.name,
+        ...(avatar ? { avatar } : {})
+      } : client));
     }
     notify("Perfil atualizado");
   }
@@ -3208,6 +3257,12 @@ export function ReveeApp() {
         notify(error.message);
         throw new Error(error.message);
       }
+      await syncLinkedProfile({
+        target: "client",
+        clientId,
+        name: input.name,
+        ...(avatar ? { avatar } : {})
+      });
     }
 
     setClients((current) => current.map((client) => (client.id === clientId ? { ...client, ...patch } : client)));
@@ -3301,6 +3356,12 @@ export function ReveeApp() {
         notify(error.message);
         throw new Error(error.message);
       }
+      await syncLinkedProfile({
+        target: "member",
+        memberId: selectedMember.id,
+        name: input.name,
+        ...(avatar ? { avatar } : {})
+      });
     }
     setTeamMembers((current) => current.map((member) => member.id === selectedMember.id ? { ...member, ...patch } : member));
     notify("Membro atualizado");
