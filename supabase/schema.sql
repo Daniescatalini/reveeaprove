@@ -681,6 +681,7 @@ create table if not exists public.monthly_metrics (
   paid_impressions integer,
   paid_clicks integer,
   paid_leads integer,
+  paid_cpc numeric(12,2),
   status text not null default 'filling' check (status in ('filling','sent_to_client','reviewed','closed')),
   client_feedback text,
   created_by uuid references public.users(id) on delete set null,

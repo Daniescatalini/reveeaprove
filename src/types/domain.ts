@@ -236,6 +236,7 @@ export type MonthlyMetric = {
   paid_impressions?: number | null;
   paid_clicks?: number | null;
   paid_leads?: number | null;
+  paid_cpc?: number | null;
   status?: MonthlyMetricStatus | null;
   client_feedback?: string | null;
   created_by?: string | null;

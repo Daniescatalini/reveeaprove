@@ -134,6 +134,7 @@ type MonthlyMetricFormInput = {
   paid_impressions: string;
   paid_clicks: string;
   paid_leads: string;
+  paid_cpc: string;
   status: MonthlyMetricStatus;
 };
 
@@ -400,6 +401,7 @@ const seedMonthlyMetrics: MonthlyMetric[] = [
     paid_impressions: 118000,
     paid_clicks: 1720,
     paid_leads: 84,
+    paid_cpc: 1.05,
     status: "filling",
     client_feedback: null,
     created_by: "local-user",
@@ -684,6 +686,18 @@ function metricComparison(current?: number | null, previous?: number | null) {
   const change = ((current - previous) / previous) * 100;
   if (!Number.isFinite(change)) return null;
   return `${change > 0 ? "+" : ""}${change.toFixed(1).replace(".", ",")}%`;
+}
+
+function metricComparisonLabel(current?: number | null, previous?: number | null, lowerIsBetter = false) {
+  if (!current || !previous) return "—";
+  const change = ((current - previous) / previous) * 100;
+  if (!Number.isFinite(change)) return "—";
+  const positive = lowerIsBetter ? change < 0 : change > 0;
+  const negative = lowerIsBetter ? change > 0 : change < 0;
+  const label = `${change > 0 ? "+" : ""}${change.toFixed(1).replace(".", ",")}%`;
+  if (positive) return `<span class="change positive">${label}</span>`;
+  if (negative) return `<span class="change negative">${label}</span>`;
+  return `<span class="change neutral">${label}</span>`;
 }
 
 function calculateCampaignTotal(startDate: string, endDate: string, dailyBudget: string) {
@@ -1442,6 +1456,8 @@ export function ReveeApp() {
       .sort((a, b) => a.start_date.localeCompare(b.start_date));
   }, [activeClient?.id, campaigns, clients, monthFilter, query]);
 
+  const feedPreviewPosts = useMemo(() => scopedPosts.filter((post) => post.status !== "draft"), [scopedPosts]);
+
   const scopedGoals = useMemo(() => {
     return monthlyGoals
       .filter((goal) => goal.client_id === activeClient?.id)
@@ -2110,18 +2126,18 @@ export function ReveeApp() {
                   {view === "feed" && (
                     <FeedView
                       client={activeClient}
-                      posts={scopedPosts}
+                      posts={feedPreviewPosts}
                       isClient={isClientUser}
                       statusMeta={statusMeta}
                       onOpenPost={setSelectedPost}
                       onReorder={reorderFeed}
                       generalRequests={comments
-                        .filter((comment) => scopedPosts.some((post) => post.id === comment.post_id) && comment.content.toLowerCase().includes("observação geral do preview do feed"))
+                        .filter((comment) => feedPreviewPosts.some((post) => post.id === comment.post_id) && comment.content.toLowerCase().includes("observação geral do preview do feed"))
                         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())}
                       currentUserId={profile?.id}
                       onDeleteComment={deleteComment}
                       onComment={(content) => {
-                        const targetPost = scopedPosts.slice().sort((a, b) => a.feed_order - b.feed_order)[0];
+                        const targetPost = feedPreviewPosts.slice().sort((a, b) => a.feed_order - b.feed_order)[0];
                         if (targetPost) void addComment(targetPost.id, `Observação geral do preview do feed: ${content}`);
                       }}
                     />
@@ -2600,6 +2616,7 @@ export function ReveeApp() {
       paid_impressions: parseMetricNumber(input.paid_impressions) || null,
       paid_clicks: parseMetricNumber(input.paid_clicks) || null,
       paid_leads: parseMetricNumber(input.paid_leads) || null,
+      paid_cpc: parseCurrencyInput(input.paid_cpc) || null,
       status: input.status,
       created_by: existing?.created_by ?? profile?.id ?? null,
       updated_at: now
@@ -6259,8 +6276,6 @@ function MetricsView({
   const previousReachTotal = (previousMetric?.instagram_reach ?? 0) + (previousMetric?.paid_reach ?? 0);
   const impressionsTotal = (metric?.instagram_impressions ?? 0) + (metric?.paid_impressions ?? 0);
   const previousImpressionsTotal = (previousMetric?.instagram_impressions ?? 0) + (previousMetric?.paid_impressions ?? 0);
-  const costPerLead = metric?.paid_investment && metric?.paid_leads ? metric.paid_investment / metric.paid_leads : null;
-  const previousCostPerLead = previousMetric?.paid_investment && previousMetric?.paid_leads ? previousMetric.paid_investment / previousMetric.paid_leads : null;
   const metricHistory = [...metrics].sort((a, b) => metricMonthKey(a).localeCompare(metricMonthKey(b))).slice(-6);
   const general = [
     { label: "Impressões", value: metric?.instagram_impressions, previous: previousMetric?.instagram_impressions },
@@ -6275,12 +6290,11 @@ function MetricsView({
     { label: "Repost", value: metric?.instagram_reposts, previous: previousMetric?.instagram_reposts }
   ];
   const paid = [
-    { label: "Investimento", value: metric?.paid_investment, previous: previousMetric?.paid_investment, money: true },
-    { label: "Alcance pago", value: metric?.paid_reach, previous: previousMetric?.paid_reach },
-    { label: "Impressões pagas", value: metric?.paid_impressions, previous: previousMetric?.paid_impressions },
+    { label: "Investimento total", value: metric?.paid_investment, previous: previousMetric?.paid_investment, money: true },
+    { label: "Visualizações", value: metric?.paid_reach, previous: previousMetric?.paid_reach },
+    { label: "CPC", value: metric?.paid_cpc, previous: previousMetric?.paid_cpc, money: true, lowerIsBetter: true },
     { label: "Cliques", value: metric?.paid_clicks, previous: previousMetric?.paid_clicks },
-    { label: "Leads", value: metric?.paid_leads, previous: previousMetric?.paid_leads },
-    { label: "Custo por lead", value: costPerLead, previous: previousCostPerLead, money: true, lowerIsBetter: true }
+    { label: "Leads", value: metric?.paid_leads, previous: previousMetric?.paid_leads }
   ];
   const summary = [
     { label: "Alcance total", value: reachTotal || null, previous: previousReachTotal || null },
@@ -6349,7 +6363,7 @@ function MetricsView({
           <MetricSection title="Engajamentos" items={engagements} />
           <MetricSection title="Tráfego pago" items={paid} />
           <section className="grid gap-4 xl:grid-cols-3">
-            <MetricChart title="Evolução de alcance" history={metricHistory} getValue={(item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)} />
+            <MetricChart title="Evolução de visualizações" history={metricHistory} getValue={(item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)} />
             <MetricChart title="Evolução de seguidores" history={metricHistory} getValue={(item) => item.instagram_followers ?? 0} />
             <InvestmentLeadChart history={metricHistory} />
           </section>
@@ -6573,50 +6587,79 @@ function exportMetricsReport({
   previousMetric: MonthlyMetric | null;
   history: MonthlyMetric[];
 }) {
-  const costPerLead = metric.paid_investment && metric.paid_leads ? metric.paid_investment / metric.paid_leads : null;
-  const previousCostPerLead = previousMetric?.paid_investment && previousMetric.paid_leads ? previousMetric.paid_investment / previousMetric.paid_leads : null;
-  const reachTotal = (metric.instagram_reach ?? 0) + (metric.paid_reach ?? 0);
+  const reachTotal = metric.paid_reach ?? 0;
   const impressionsTotal = (metric.instagram_impressions ?? 0) + (metric.paid_impressions ?? 0);
+  const historyWithCurrent = history.length ? history : [metric];
+  const historyLabels = historyWithCurrent.map((item) => `${String(item.month).padStart(2, "0")}/${String(item.year).slice(2)}`);
+  const viewsValues = historyWithCurrent.map((item) => item.paid_reach ?? 0);
+  const followerValues = historyWithCurrent.map((item) => item.instagram_followers ?? 0);
+  const investmentValues = historyWithCurrent.map((item) => item.paid_investment ?? 0);
+  const leadValues = historyWithCurrent.map((item) => item.paid_leads ?? 0);
   const rows = [
-    ["Geral · Impressões", metricValue(metric.instagram_impressions), metricComparison(metric.instagram_impressions, previousMetric?.instagram_impressions) ?? "—"],
-    ["Geral · Interações", metricValue(metric.instagram_engagement), metricComparison(metric.instagram_engagement, previousMetric?.instagram_engagement) ?? "—"],
-    ["Geral · Seguidores", metricValue(metric.instagram_followers), metricComparison(metric.instagram_followers, previousMetric?.instagram_followers) ?? "—"],
-    ["Engajamentos · Curtidas", metricValue(metric.instagram_likes), metricComparison(metric.instagram_likes, previousMetric?.instagram_likes) ?? "—"],
-    ["Engajamentos · Comentários", metricValue(metric.instagram_comments), metricComparison(metric.instagram_comments, previousMetric?.instagram_comments) ?? "—"],
-    ["Engajamentos · Salvamentos", metricValue(metric.instagram_saves), metricComparison(metric.instagram_saves, previousMetric?.instagram_saves) ?? "—"],
-    ["Engajamentos · Compartilhamentos", metricValue(metric.instagram_shares), metricComparison(metric.instagram_shares, previousMetric?.instagram_shares) ?? "—"],
-    ["Engajamentos · Repost", metricValue(metric.instagram_reposts), metricComparison(metric.instagram_reposts, previousMetric?.instagram_reposts) ?? "—"],
-    ["Investimento", metricCurrency(metric.paid_investment), metricComparison(metric.paid_investment, previousMetric?.paid_investment) ?? "—"],
-    ["Alcance pago", metricValue(metric.paid_reach), metricComparison(metric.paid_reach, previousMetric?.paid_reach) ?? "—"],
-    ["Impressões pagas", metricValue(metric.paid_impressions), metricComparison(metric.paid_impressions, previousMetric?.paid_impressions) ?? "—"],
-    ["Cliques pagos", metricValue(metric.paid_clicks), metricComparison(metric.paid_clicks, previousMetric?.paid_clicks) ?? "—"],
-    ["Leads", metricValue(metric.paid_leads), metricComparison(metric.paid_leads, previousMetric?.paid_leads) ?? "—"],
-    ["Custo por lead", metricCurrency(costPerLead), metricComparison(costPerLead, previousCostPerLead) ?? "—"]
+    ["Geral · Impressões", metricValue(metric.instagram_impressions), metricComparisonLabel(metric.instagram_impressions, previousMetric?.instagram_impressions)],
+    ["Geral · Interações", metricValue(metric.instagram_engagement), metricComparisonLabel(metric.instagram_engagement, previousMetric?.instagram_engagement)],
+    ["Geral · Seguidores", metricValue(metric.instagram_followers), metricComparisonLabel(metric.instagram_followers, previousMetric?.instagram_followers)],
+    ["Engajamentos · Curtidas", metricValue(metric.instagram_likes), metricComparisonLabel(metric.instagram_likes, previousMetric?.instagram_likes)],
+    ["Engajamentos · Comentários", metricValue(metric.instagram_comments), metricComparisonLabel(metric.instagram_comments, previousMetric?.instagram_comments)],
+    ["Engajamentos · Salvamentos", metricValue(metric.instagram_saves), metricComparisonLabel(metric.instagram_saves, previousMetric?.instagram_saves)],
+    ["Engajamentos · Compartilhamentos", metricValue(metric.instagram_shares), metricComparisonLabel(metric.instagram_shares, previousMetric?.instagram_shares)],
+    ["Engajamentos · Repost", metricValue(metric.instagram_reposts), metricComparisonLabel(metric.instagram_reposts, previousMetric?.instagram_reposts)],
+    ["Tráfego · Investimento total", metricCurrency(metric.paid_investment), metricComparisonLabel(metric.paid_investment, previousMetric?.paid_investment)],
+    ["Tráfego · Visualizações", metricValue(metric.paid_reach), metricComparisonLabel(metric.paid_reach, previousMetric?.paid_reach)],
+    ["Tráfego · CPC", metricCurrency(metric.paid_cpc), metricComparisonLabel(metric.paid_cpc, previousMetric?.paid_cpc, true)],
+    ["Tráfego · Cliques", metricValue(metric.paid_clicks), metricComparisonLabel(metric.paid_clicks, previousMetric?.paid_clicks)],
+    ["Tráfego · Leads", metricValue(metric.paid_leads), metricComparisonLabel(metric.paid_leads, previousMetric?.paid_leads)]
   ];
-  const chartLabels = history.map((item) => `${String(item.month).padStart(2, "0")}/${String(item.year).slice(2)}`).join(" · ");
+  const movement: Array<[string, number | null | undefined, number | null | undefined]> = [
+    ["Impressões", metric.instagram_impressions, previousMetric?.instagram_impressions],
+    ["Interações", metric.instagram_engagement, previousMetric?.instagram_engagement],
+    ["Seguidores", metric.instagram_followers, previousMetric?.instagram_followers],
+    ["Leads", metric.paid_leads, previousMetric?.paid_leads]
+  ];
   const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
   <title>Relatório ${clientName} - ${headline}</title>
   <style>
+    * { box-sizing: border-box; }
     body { margin: 0; background: #f7f6fa; color: #170b43; font-family: Inter, Arial, sans-serif; }
-    .page { max-width: 920px; margin: 0 auto; padding: 44px; }
-    .hero { border-radius: 28px; background: linear-gradient(135deg, #170b43, #7450a8); color: white; padding: 34px; }
+    .page { max-width: 980px; margin: 0 auto; padding: 42px; }
+    .hero { position: relative; overflow: hidden; border-radius: 30px; background: radial-gradient(circle at 16% 10%, rgba(183, 128, 223, .45), transparent 34%), linear-gradient(135deg, #170b43 0%, #3f1f75 58%, #a45bb5 100%); color: white; padding: 36px; box-shadow: 0 28px 70px rgba(23, 11, 67, .22); }
+    .hero:after { content: ""; position: absolute; right: -80px; bottom: -120px; width: 360px; height: 360px; border: 1px solid rgba(255,255,255,.28); border-radius: 50%; }
     .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .16em; opacity: .72; font-weight: 800; }
-    h1 { margin: 10px 0 6px; font-size: 34px; letter-spacing: -.03em; }
+    h1 { margin: 10px 0 6px; font-size: 36px; letter-spacing: -.03em; }
+    h2 { margin: 0 0 14px; font-size: 18px; }
     .muted { color: #8f8aa6; }
     .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 22px 0; }
-    .card { background: white; border: 1px solid #e6e2ef; border-radius: 18px; padding: 18px; box-shadow: 0 18px 50px rgba(23, 11, 67, .08); }
-    .label { font-size: 11px; color: #8f8aa6; font-weight: 700; }
-    .value { margin-top: 8px; font-size: 25px; font-weight: 300; letter-spacing: -.03em; }
-    table { width: 100%; border-collapse: collapse; background: white; border-radius: 18px; overflow: hidden; margin-top: 16px; }
-    th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid #eeeaf6; font-size: 13px; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: rgba(255,255,255,.92); border: 1px solid #e6e2ef; border-radius: 20px; padding: 18px; box-shadow: 0 18px 50px rgba(23, 11, 67, .08); }
+    .label { font-size: 11px; color: #8f8aa6; font-weight: 800; text-transform: uppercase; letter-spacing: .12em; }
+    .value { margin-top: 8px; font-size: 27px; font-weight: 300; letter-spacing: -.03em; }
+    .section { margin-top: 22px; }
+    .movement { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .movement strong { display: block; margin-top: 8px; font-size: 18px; }
+    .change { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 9px; font-size: 12px; font-weight: 800; }
+    .positive { background: #efe4fb; color: #7f4cb1; }
+    .negative { background: #f4e8ef; color: #8b4167; }
+    .neutral { background: #f1eff6; color: #77708d; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; }
+    th, td { text-align: left; padding: 13px 14px; border-bottom: 1px solid #eeeaf6; font-size: 13px; }
     th { color: #8f8aa6; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
-    .section { margin-top: 26px; }
-    .bar { height: 9px; background: #eeeaf6; border-radius: 99px; overflow: hidden; margin-top: 10px; }
-    .bar span { display: block; height: 100%; background: #7450a8; border-radius: 99px; }
-    @media print { body { background: white; } .page { padding: 24px; } }
+    tr:last-child td { border-bottom: 0; }
+    .bars { display: flex; align-items: end; gap: 9px; height: 140px; padding-top: 10px; }
+    .bar-col { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+    .bar-track { width: 100%; height: 102px; display: flex; align-items: end; justify-content: center; border-radius: 999px; background: #f3f0f8; overflow: hidden; }
+    .bar-fill { width: 100%; min-height: 7px; border-radius: 999px 999px 0 0; background: linear-gradient(180deg, #a978d4, #4f2b84); }
+    .bar-label { font-size: 10px; color: #8f8aa6; font-weight: 800; }
+    .dual { display: flex; align-items: end; gap: 5px; width: 100%; height: 102px; justify-content: center; }
+    .dual span { width: 42%; min-height: 7px; border-radius: 999px 999px 0 0; }
+    .dual .investment { background: #4f2b84; }
+    .dual .leads { background: #c9a9e5; }
+    .legend { display: flex; gap: 12px; margin-top: 10px; color: #8f8aa6; font-size: 11px; font-weight: 800; }
+    .legend span:before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; background: #4f2b84; }
+    .legend span:last-child:before { background: #c9a9e5; }
+    @media print { body { background: white; } .page { padding: 20px; } .card, .hero { box-shadow: none; } }
   </style>
 </head>
 <body>
@@ -6627,22 +6670,40 @@ function exportMetricsReport({
       <div>${agencyName} · ${headline}</div>
     </section>
     <section class="grid">
-      <div class="card"><div class="label">Alcance total</div><div class="value">${metricValue(reachTotal)}</div></div>
+      <div class="card"><div class="label">Visualizações</div><div class="value">${metricValue(reachTotal)}</div></div>
       <div class="card"><div class="label">Impressões totais</div><div class="value">${metricValue(impressionsTotal)}</div></div>
       <div class="card"><div class="label">Seguidores</div><div class="value">${metricValue(metric.instagram_followers)}</div></div>
-      <div class="card"><div class="label">Investimento</div><div class="value">${metricCurrency(metric.paid_investment)}</div></div>
+      <div class="card"><div class="label">Investimento total</div><div class="value">${metricCurrency(metric.paid_investment)}</div></div>
     </section>
     <section class="section card">
-      <div class="eyebrow muted">Comparativo com mês anterior</div>
-      <table>
-        <thead><tr><th>Métrica</th><th>Resultado</th><th>Variação</th></tr></thead>
-        <tbody>${rows.map((row) => `<tr><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td></tr>`).join("")}</tbody>
-      </table>
+      <h2>Movimento do mês</h2>
+      <div class="movement">
+        ${movement.map(([label, value, previous]) => `<div><div class="label">${label}</div><strong>${metricValue(value)}</strong>${metricComparisonLabel(value, previous)}</div>`).join("")}
+      </div>
     </section>
-    <section class="section card">
-      <div class="eyebrow muted">Evolução recente</div>
-      <p class="muted">${chartLabels || "Sem histórico suficiente."}</p>
-      <div class="bar"><span style="width:${Math.min(100, Math.max(8, (reachTotal / Math.max(...history.map((item) => (item.instagram_reach ?? 0) + (item.paid_reach ?? 0)), reachTotal, 1)) * 100))}%"></span></div>
+    <section class="section two">
+      <div class="card">
+        <h2>Evolução de visualizações</h2>
+        ${makeReportBars(viewsValues, historyLabels)}
+      </div>
+      <div class="card">
+        <h2>Evolução de seguidores</h2>
+        ${makeReportBars(followerValues, historyLabels)}
+      </div>
+    </section>
+    <section class="section two">
+      <div class="card">
+        <h2>Investimento x leads</h2>
+        ${makeReportDualBars(investmentValues, leadValues, historyLabels)}
+        <div class="legend"><span>Investimento</span><span>Leads</span></div>
+      </div>
+      <div class="card">
+        <h2>Comparativo completo</h2>
+        <table>
+          <thead><tr><th>Métrica</th><th>Resultado</th><th>Variação</th></tr></thead>
+          <tbody>${rows.map((row) => `<tr><td>${row[0]}</td><td>${row[1]}</td><td>${row[2]}</td></tr>`).join("")}</tbody>
+        </table>
+      </div>
     </section>
     ${metric.client_feedback ? `<section class="section card"><div class="eyebrow muted">Feedback do cliente</div><p>${metric.client_feedback}</p></section>` : ""}
   </main>
@@ -6653,6 +6714,24 @@ function exportMetricsReport({
   if (!popup) return;
   popup.document.write(html);
   popup.document.close();
+}
+
+function makeReportBars(values: number[], labels: string[]) {
+  const max = Math.max(...values, 1);
+  return `<div class="bars">${values.map((value, index) => {
+    const height = Math.max(7, Math.round((value / max) * 100));
+    return `<div class="bar-col"><div class="bar-track"><span class="bar-fill" style="height:${height}%"></span></div><span class="bar-label">${labels[index]}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function makeReportDualBars(investments: number[], leads: number[], labels: string[]) {
+  const maxInvestment = Math.max(...investments, 1);
+  const maxLeads = Math.max(...leads, 1);
+  return `<div class="bars">${labels.map((label, index) => {
+    const investmentHeight = Math.max(7, Math.round(((investments[index] ?? 0) / maxInvestment) * 100));
+    const leadHeight = Math.max(7, Math.round(((leads[index] ?? 0) / maxLeads) * 100));
+    return `<div class="bar-col"><div class="dual"><span class="investment" style="height:${investmentHeight}%"></span><span class="leads" style="height:${leadHeight}%"></span></div><span class="bar-label">${label}</span></div>`;
+  }).join("")}</div>`;
 }
 
 function CampaignsView({
@@ -6819,6 +6898,7 @@ function MetricsFormModal({
     paid_impressions: "",
     paid_clicks: "",
     paid_leads: "",
+    paid_cpc: "",
     status: "filling"
   });
   const [saving, setSaving] = useState(false);
@@ -6844,14 +6924,12 @@ function MetricsFormModal({
       paid_impressions: metric?.paid_impressions ? String(metric.paid_impressions) : "",
       paid_clicks: metric?.paid_clicks ? String(metric.paid_clicks) : "",
       paid_leads: metric?.paid_leads ? String(metric.paid_leads) : "",
+      paid_cpc: metric?.paid_cpc ? formatCurrency(metric.paid_cpc) : "",
       status: metric?.status ?? "filling"
     });
   }, [activeClientId, metric, monthFilter, open]);
   if (!open) return null;
   const update = <K extends keyof MonthlyMetricFormInput>(key: K, value: MonthlyMetricFormInput[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const costPerLead = parseCurrencyInput(form.paid_investment) && parseMetricNumber(form.paid_leads)
-    ? parseCurrencyInput(form.paid_investment) / parseMetricNumber(form.paid_leads)
-    : null;
   return (
     <ModalFrame title={metric ? "Editar métricas" : "Adicionar métricas do mês"} onClose={onClose}>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -6891,18 +6969,24 @@ function MetricsFormModal({
         <h3 className="mb-3 text-sm font-semibold text-primary">Tráfego pago</h3>
         <div className="grid gap-4 lg:grid-cols-2">
           <Field
-            label="Investimento"
+            label="Investimento total"
             value={form.paid_investment}
             onChange={(value) => update("paid_investment", value)}
             onBlur={() => update("paid_investment", formatCurrencyInput(form.paid_investment))}
             inputMode="decimal"
             placeholder="R$ 0,00"
           />
-          <Field label="Alcance pago" value={form.paid_reach} onChange={(value) => update("paid_reach", value)} inputMode="numeric" />
-          <Field label="Impressões pagas" value={form.paid_impressions} onChange={(value) => update("paid_impressions", value)} inputMode="numeric" />
+          <Field label="Visualizações" value={form.paid_reach} onChange={(value) => update("paid_reach", value)} inputMode="numeric" />
+          <Field
+            label="CPC"
+            value={form.paid_cpc}
+            onChange={(value) => update("paid_cpc", value)}
+            onBlur={() => update("paid_cpc", formatCurrencyInput(form.paid_cpc))}
+            inputMode="decimal"
+            placeholder="R$ 0,00"
+          />
           <Field label="Cliques" value={form.paid_clicks} onChange={(value) => update("paid_clicks", value)} inputMode="numeric" />
           <Field label="Leads" value={form.paid_leads} onChange={(value) => update("paid_leads", value)} inputMode="numeric" />
-          <InfoMini label="Custo por lead" value={costPerLead ? formatCurrency(costPerLead) : "—"} />
         </div>
       </div>
 

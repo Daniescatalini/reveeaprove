@@ -19,6 +19,7 @@ create table if not exists public.monthly_metrics (
   paid_impressions integer,
   paid_clicks integer,
   paid_leads integer,
+  paid_cpc numeric(12,2),
   status text not null default 'filling' check (status in ('filling','sent_to_client','reviewed','closed')),
   client_feedback text,
   created_by uuid references public.users(id) on delete set null,
@@ -78,6 +79,7 @@ alter table public.monthly_metrics
   add column if not exists paid_impressions integer,
   add column if not exists paid_clicks integer,
   add column if not exists paid_leads integer,
+  add column if not exists paid_cpc numeric(12,2),
   add column if not exists status text not null default 'filling',
   add column if not exists client_feedback text,
   add column if not exists created_by uuid references public.users(id) on delete set null;
